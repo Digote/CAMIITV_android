@@ -58,6 +58,12 @@
       "reactCompiler": true
     },
     "name": "CAMIITV",
-    "slug": "CAMIITV"
+    "slug": "CAMIITV",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a12556e6-0ae7-4d22-8b71-0beb66062e5f"
+      }
+    }
   }
 }

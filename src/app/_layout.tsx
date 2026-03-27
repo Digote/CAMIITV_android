@@ -1,22 +1,21 @@
-import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
-} from '@react-navigation/native';
+// app/_layout.tsx
+import { Stack } from 'expo-router';
 import React from 'react';
-import { Platform, useColorScheme } from 'react-native';
+import { StatusBar } from 'react-native';
+import 'react-native-gesture-handler';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      {Platform.OS === 'ios' || !Platform.isTV ? (
-        <AnimatedSplashOverlay />
-      ) : null}
-      <AppTabs />
-    </ThemeProvider>
+    <>
+      <StatusBar barStyle="light-content" backgroundColor="#000001" />
+      <Stack>
+        {/* <Stack.Screen name="(drawer)" options={{ headerShown: false }} /> */}
+        <Stack.Screen name="index" options={{ headerShown: false,}} />
+        <Stack.Screen name="perfil" options={{ headerShown: false,}} />
+
+        {/* Rota dinâmica fica aqui, fora das abas */}
+        <Stack.Screen name="anime/[id]" options={{ headerShown: false, title: 'Detalhes' }}/>
+      </Stack>
+    </>
   );
 }

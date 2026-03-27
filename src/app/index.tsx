@@ -1,86 +1,98 @@
-import { StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { SafeAreaView, ScrollView } from 'react-native';
+import Header from '../components/Header';
+import Section from '../components/Section';
+import api from '@/services/api';
+import SideMenuLayout, { MenuItem } from '../components/SideMenuLayout';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { useScreenDimensions } from '@/hooks/use-screen-dimensions';
 
-export default function HomeScreen() {
-  const styles = useHomeStyles();
+// import { AuthContext } from '../context/AuthContext';
+
+export default function Home() {
+  // const { logout } = useContext(AuthContext);
+
+  const [animes, setAnimes] = useState([]);
+  const [animes_assitindo, setAnimesAssitindo] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/animes")
+      .then((response) => {
+        const data = response.data;
+
+        const mapped = Array.isArray(data)
+          ? data.map((item) => ({
+              id: String(item.id),
+              title: item.nome,
+              thumbnail: item.imagem,
+            }))
+          : [] as any;
+
+        setAnimes(mapped);
+        setLoading(false);
+      })
+      .catch((error) => {
+        console.error('Erro ao buscar animes:', error);
+        console.log(error)
+        setLoading(false);
+      });
+
+
+    api.get("/animes/assitindo")
+      .then((response) => {
+        const data = response.data;
+        // console.log(data)
+
+        const mapped = Array.isArray(data)
+          ? data.map((item) => ({
+              id: String(item.anime_id),
+              title: item.anime,
+              thumbnail: item.imagem,
+            }))
+          : [] as any;
+
+        // console.log(mapped)
+
+        setAnimesAssitindo(mapped);
+        setLoading(false);
+      })
+      .catch((error) => {
+        console.error('Erro ao buscar animes1:', error);
+        console.log(error)
+        setLoading(false);
+      });
+
+  }, []);
+
+  // console.log(Platform.OS)
+  // if (Platform.OS === 'android' && Platform.isTV) {
+  //   return <SideMenu current="Home" />;
+  // }
+
+  const menuItems: MenuItem[] = [
+    { icon: 'home', label: 'Início', route: '/' },
+    { icon: 'home', label: 'AN', route: '/an' },
+    { icon: 'user', label: 'Perfil', route: '/perfil' },
+  ];
+
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedView style={styles.titleContainer}>
-            <ThemedText type="title" style={styles.title}>
-              Welcome to&nbsp;Expo
-            </ThemedText>
-          </ThemedView>
-        </ThemedView>
+    
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#000001', flexDirection: 'row' }}>
+      <SideMenuLayout menuItems={menuItems}>
+        <Header />
+        <ScrollView>
+          <ScrollView >
+          <Section title="Continue Assistindo" data={animes_assitindo} />
+          <Section title="Animes" data={animes} />
+          {/* <Section title="Em Alta" data={animes} />
+          <Section title="Lançamentos da Semana" data={animes} />
+          <Section title="Recomendados para Você" data={animes} /> */}
+        </ScrollView>
+        </ScrollView>
+      </SideMenuLayout>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow title="Try editing" hint="src/app/(tabs)/index.tsx" />
-          <HintRow title="Dev tools" hint="cmd+d" />
-          <HintRow title="Fresh start" hint="npm reset project" />
-        </ThemedView>
-
-        <WebBadge />
-      </SafeAreaView>
-    </ThemedView>
+    </SafeAreaView>
   );
+
 }
-
-const useHomeStyles = () => {
-  const { spacing, width, landscape } = useScreenDimensions();
-
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      width,
-    },
-    safeArea: {
-      marginTop: landscape ? spacing.six : 0,
-      marginBottom: landscape ? spacing.two : spacing.six,
-      paddingHorizontal: spacing.four,
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      gap: spacing.three,
-      maxWidth: width * 0.8,
-    },
-    heroSection: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      flex: 1,
-      paddingHorizontal: spacing.four,
-      gap: landscape ? spacing.one : spacing.four,
-      marginBottom: landscape ? spacing.four : spacing.six,
-    },
-    titleContainer: {
-      marginTop: landscape ? spacing.two : 0,
-    },
-    title: {
-      textAlign: 'center',
-    },
-    code: {
-      lineHeight: spacing.four,
-      textTransform: 'uppercase',
-    },
-    stepContainer: {
-      gap: spacing.three,
-      alignSelf: 'stretch',
-      paddingHorizontal: spacing.three,
-      paddingVertical: spacing.four,
-      borderRadius: spacing.four,
-    },
-  });
-};

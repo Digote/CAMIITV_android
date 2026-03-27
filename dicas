@@ -1,0 +1,9 @@
+eas build --profile development --platform android
+
+npx eas build --profile development_tv --platform android
+
+rodar
+npx expo start
+
+
+exp://IP_DO_PC:8081
