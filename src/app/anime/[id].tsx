@@ -36,7 +36,6 @@ export default function AnimeScreen() {
 
   // REFERÊNCIAS
   const scrollRef = useRef<ScrollView>(null);
-  const firstSeasonRef = useRef<View>(null);
   const appState = useRef(AppState.currentState);
 
   // ESTADOS DE DADOS
@@ -71,36 +70,84 @@ export default function AnimeScreen() {
         const res = await api.get(`/anime/${id}`);
         const data = res.data;
         const item = Array.isArray(data) ? data[0] : data;
-        // console.log(item)
+        
         setAnime({
           id: item.id?.toString() || id,
           nome: item.nome,
-          imagem: item.imagem,   // Capa (Poster)
-          banner: item.banner,   // Fundo
+          imagem: item.imagem,   
+          banner: item.banner,   
           descricao: item.descricao,
           ano: item.temporada_ano,
           nota: item.nota_mal,
           nota_tmdb: item.nota_tmdb,
-          // classificacao: '16+',
           generos: ['*dev*','Ação', 'Sci-Fi', 'Aventura']
         });
 
         if (item.temporadas && Array.isArray(item.temporadas)) {
           const mapped = item.temporadas.map((temp: any) => {
+            let eps: any[] = [];
             const episodeLinks = getEpisodeLinks(temp.link || '');
+
+            // 1. Se existem episódios normais cadastrados na temporada
+            if (temp.episodios && temp.episodios.length > 0) {
+              eps = temp.episodios.map((ep: any, idx: number) => {
+                let linksDoEpisodio = episodeLinks[idx] || [];
+                let isDigital = false; // <-- NOVA FLAG AQUI
+                
+                if (linksDoEpisodio.length === 0 && temp.anime_digital && temp.anime_digital.episodios) {
+                  const digitalMatch = temp.anime_digital.episodios.find((digEp: any) => {
+                    const numeros = digEp.nome ? digEp.nome.match(/\d+/g) : null;
+                    const numDigital = numeros ? parseInt(numeros[numeros.length - 1], 10) : -1;
+                    return numDigital === Number(ep.numero); 
+                  });
+                  
+                  if (digitalMatch && digitalMatch.link) {
+                    linksDoEpisodio = [digitalMatch.link];
+                    isDigital = true; // <-- MARCA COMO DIGITAL SE ACHOU O LINK LÁ
+                  }
+                }
+
+                return {
+                  id: ep.id?.toString() || '',
+                  nome: ep.nome || `Episódio ${ep.numero}`,
+                  numero: Number(ep.numero),
+                  assistido: ep.assistido,
+                  duracao: ep.duracao ? ep.duracao + 'm' : '--m',
+                  imagem: ep.imagem || item.imagem,
+                  sinopse: ep.sinopse || '',
+                  links: linksDoEpisodio, 
+                  isDigital: isDigital, // <-- SALVA A FLAG NO EPISÓDIO
+                };
+              });
+
+            } 
+            // 2. Se a temporada for vazia e usar apenas o anime_digital
+            else if (temp.anime_digital && temp.anime_digital.episodios) {
+              eps = temp.anime_digital.episodios.map((ep: any, idx: number) => {
+                const numeros = ep.nome ? ep.nome.match(/\d+/g) : null;
+                const numeroExtraido = numeros ? parseInt(numeros[numeros.length - 1], 10) : idx + 1;
+
+                return {
+                  id: ep.id_episode?.toString() || ep.id?.toString() || `dig-${idx}`,
+                  nome: ep.nome || `Episódio ${numeroExtraido}`,
+                  numero: numeroExtraido,
+                  assistido: null,
+                  duracao: '--m', 
+                  imagem: item.imagem, 
+                  sinopse: 'Episódio da versão digital.',
+                  links: ep.link ? [ep.link] : [], 
+                  isDigital: true, // <-- TODOS AQUI SÃO DIGITAIS
+                };
+              });
+            }
+
+            // Ordena os episódios pelo número para não ficarem bagunçados
+            eps.sort((a: any, b: any) => a.numero - b.numero);
+
             return {
               id: temp.id?.toString() || '',
               numero: temp.numero,
-              episodios: (temp.episodios || []).map((ep: any, idx: number) => ({
-                id: ep.id?.toString() || '',
-                nome: ep.nome || `Episódio ${ep.numero}`,
-                numero: ep.numero,
-                assistido: ep.assistido,
-                duracao: ep.duracao + 'm',
-                imagem: ep.imagem || item.imagem,
-                sinopse: ep.sinopse || '',
-                links: episodeLinks[idx] || [],
-              })),
+              episodios: eps,
             };
           });
 
@@ -143,7 +190,7 @@ export default function AnimeScreen() {
       setProximoEpisodio(temporadas[0].episodios[0]);
       setTemporadaProximoEp(temporadas[0]);
     }
-  }, [temporadas]); // Recalcula sempre que as 'temporadas' atualizarem
+  }, [temporadas]); 
 
   // Monitoramento do Retorno do VLC
   useEffect(() => {
@@ -181,7 +228,6 @@ export default function AnimeScreen() {
     try {
       await api.post(`/episodio/${episodioEmExecucao.id}/assistido`);
       
-      // Atualiza o estado raiz 'temporadas' para disparar o recalculador do próximo episódio
       setTemporadas(prevTemps => {
         const newTemps = prevTemps.map(temp => ({
           ...temp,
@@ -190,7 +236,6 @@ export default function AnimeScreen() {
           )
         }));
 
-        // Mantém a lista da temporada selecionada atualizada visualmente
         const currentTemp = newTemps.find(t => t.id === selectedTemporadaId);
         if (currentTemp) setEpisodiosLista(currentTemp.episodios);
 
@@ -248,11 +293,19 @@ export default function AnimeScreen() {
   // Define o texto dinâmico (Começar vs Continuar)
   const getWatchButtonText = () => {
     if (!proximoEpisodio || !temporadas[0]) return "Assistir";
+    
+    // Verifica se tem link
+    const hasLink = proximoEpisodio.links && proximoEpisodio.links.length > 0;
+    if (!hasLink) return "Indisponível";
+
     const isFirstEpOfAnime = proximoEpisodio.id === temporadas[0].episodios[0]?.id;
     const hasNotWatchedFirst = proximoEpisodio.assistido?.completo !== 1;
     
     return (isFirstEpOfAnime && hasNotWatchedFirst) ? "Começar a Assistir" : "Continuar Assistindo";
   };
+
+  // Verifica se o próximo episódio no topo tem link ativo
+  const mainEpisodeHasLink = proximoEpisodio?.links && proximoEpisodio.links.length > 0;
 
   // ==========================================
   // RENDERIZAÇÃO
@@ -260,7 +313,6 @@ export default function AnimeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* BACKGROUND COM VIEW DE SOBREPOSIÇÃO ESCURA */}
       <Image source={{ uri: anime.banner }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       <View style={styles.gradientReplacement} />
 
@@ -269,17 +321,14 @@ export default function AnimeScreen() {
         style={styles.mainScroll}
         contentContainerStyle={styles.mainScrollContent}
       >
-        {/* HEADER: TEXTOS NA ESQUERDA, POSTER NA DIREITA */}
         <View style={styles.headerContainer}>
           <View style={styles.headerLeft}>
             <Text style={styles.animeTitle} numberOfLines={2}>{anime.nome}</Text>
             
             <View style={styles.metadataRow}>
               <Text style={styles.metaNota}>★ {anime.nota}<Text style={styles.metaNotaType}>MAL</Text></Text>
-              
               <Text style={styles.metaNota}>★ {anime.nota_tmdb}<Text style={styles.metaNotaType}>TMBD</Text></Text>
               <Text style={styles.metaText}>{anime.ano}</Text>
-              {/* <View style={styles.metaBadge}><Text style={styles.metaBadgeText}>{anime.classificacao}</Text></View> */}
               <Text style={styles.metaText}>{temporadas.length} Temporada(s)</Text>
             </View>
 
@@ -288,29 +337,32 @@ export default function AnimeScreen() {
             </Text>
             <Text style={styles.genresText}>{anime.generos?.join(' • ')}</Text>
 
-            {/* BOTÃO ASSISTIR DINÂMICO COM IMAGEM DO EPISÓDIO */}
+            {/* BOTÃO ASSISTIR DINÂMICO */}
             {proximoEpisodio && (
               <Pressable
-                hasTVPreferredFocus={true} // Inicia a página focado aqui
-                focusable={true}
+                hasTVPreferredFocus={true} 
+                focusable={mainEpisodeHasLink} 
+                disabled={!mainEpisodeHasLink} 
                 onPress={() => vlcPress(proximoEpisodio)}
-                style={({ focused }) => [
+                // ADICIONADO: "pressed" para reagir ao toque no celular
+                style={({ focused, pressed }) => [
                   styles.btnAssistirDinamico,
-                  focused && styles.btnAssistirDinamicoFocused
+                  (focused || pressed) && styles.btnAssistirDinamicoFocused,
+                  !mainEpisodeHasLink && styles.btnAssistirDinamicoDisabled 
                 ]}
               >
-                {({ focused }) => (
+                {({ focused, pressed }) => (
                   <>
                     <Image source={{ uri: proximoEpisodio.imagem }} style={styles.btnAssistirImg} resizeMode="cover" />
                     <View style={styles.btnAssistirContent}>
-                      <Text style={[styles.btnAssistirLabel, focused && { color: COLORS.textRef }]}>
+                      <Text style={[styles.btnAssistirLabel, (focused || pressed) && { color: COLORS.textRef }]}>
                         {getWatchButtonText()}
                       </Text>
-                      <Text style={[styles.btnAssistirEpNome, focused && { color: COLORS.primary }]} numberOfLines={1}>
-                        T{temporadaProximoEp?.numero} : E{proximoEpisodio.numero} - {proximoEpisodio.nome}
+                      <Text style={[styles.btnAssistirEpNome, (focused || pressed) && { color: COLORS.primary }]} numberOfLines={1}>
+                        {temporadaProximoEp?.numero === 'Digital' ? 'Digital' : `T${temporadaProximoEp?.numero}`} : E{proximoEpisodio.numero} - {proximoEpisodio.nome}
                       </Text>
                     </View>
-                    <View style={[styles.btnAssistirPlay, focused && styles.btnAssistirPlayFocused]}>
+                    <View style={[styles.btnAssistirPlay, (focused || pressed) && styles.btnAssistirPlayFocused]}>
                       <Text style={styles.btnAssistirPlayIcon}>▶</Text>
                     </View>
                   </>
@@ -319,13 +371,11 @@ export default function AnimeScreen() {
             )}
           </View>
 
-          {/* CAPA (POSTER) DO ANIME NA DIREITA */}
           <View style={styles.headerRight}>
              <Image source={{ uri: anime.imagem }} style={styles.animePoster} resizeMode="cover" />
           </View>
         </View>
 
-        {/* CONTEÚDO (TEMPORADAS E EPISÓDIOS) */}
         <View style={styles.contentSection}>
           <View style={styles.seasonsContainer}>
             <Text style={styles.sectionTitle}>Episódios</Text>
@@ -336,24 +386,31 @@ export default function AnimeScreen() {
                   <Pressable
                     key={item.id}
                     focusable={true}
+                    // AÇÕES PARA TV (Foco)
                     onFocus={() => {
                       setSeasonFocusedIndex(index);
                       handleSelectTemporada(item.id);
                     }}
                     onBlur={() => setSeasonFocusedIndex(null)}
-                    style={({ focused }) => [
+                    // ADICIONADO: AÇÃO PARA CELULAR (Toque)
+                    onPress={() => {
+                      setSeasonFocusedIndex(index);
+                      handleSelectTemporada(item.id);
+                    }}
+                    // ADICIONADO: "pressed" no estilo
+                    style={({ focused, pressed }) => [
                       styles.seasonButton,
                       isSelected && styles.seasonButtonSelected,
-                      focused && styles.seasonButtonFocused
+                      (focused || pressed) && styles.seasonButtonFocused
                     ]}
                   >
-                    {({ focused }) => (
+                    {({ focused, pressed }) => (
                       <Text style={[
                         styles.seasonButtonText,
                         isSelected && styles.seasonButtonTextSelected,
-                        focused && styles.seasonButtonTextFocused
+                        (focused || pressed) && styles.seasonButtonTextFocused
                       ]}>
-                        T{item.numero}
+                        {item.numero === 'Digital' ? 'Digital' : `T${item.numero}`}
                       </Text>
                     )}
                   </Pressable>
@@ -365,15 +422,20 @@ export default function AnimeScreen() {
           <View style={styles.episodesContainer}>
             {episodiosLista.map((ep: any, index: number) => {
               const isAssistido = ep.assistido?.completo === 1;
+              const hasLink = ep.links && ep.links.length > 0; 
+              
               return (
                 <Pressable
                   key={ep.id || index}
-                  focusable={true}
+                  focusable={hasLink} 
+                  disabled={!hasLink} 
                   android_ripple={{ color: COLORS.border }}
-                  style={({ focused }) => [
+                  // ADICIONADO: "pressed" no estilo
+                  style={({ focused, pressed }) => [
                     styles.epCard,
-                    focused && styles.epCardFocused,
-                    isAssistido && styles.epCardAssistido
+                    (focused || pressed) && styles.epCardFocused,
+                    isAssistido && styles.epCardAssistido,
+                    !hasLink && styles.epCardDisabled 
                   ]}
                   onPress={() => vlcPress(ep)}
                   onLongPress={() => {
@@ -382,22 +444,31 @@ export default function AnimeScreen() {
                   }}
                   delayLongPress={600}
                 >
-                  {({ focused }) => (
+                  {({ focused, pressed }) => (
                     <>
                       <View style={styles.epThumbnailWrapper}>
                         <Image source={{ uri: ep.imagem }} style={styles.epThumbnail} resizeMode="cover" />
                         <View style={styles.epDurationBadge}><Text style={styles.epDurationText}>{ep.duracao}</Text></View>
                         {isAssistido && <View style={styles.epCheckBadge}><Text style={styles.epCheckText}>✓</Text></View>}
+                        
+                        {/* NOVA ETIQUETA DIGITAL AQUI */}
+                        {ep.isDigital && (
+                          <View style={styles.epDigitalBadge}>
+                            <Text style={styles.epDigitalText}>DIGITAL</Text>
+                          </View>
+                        )}
+
                       </View>
                       <View style={styles.epTextContainer}>
-                        <Text style={[styles.epTitle, focused && styles.epTitleFocused]} numberOfLines={1}>
-                          {ep.numero}. {ep.nome}
+                        <Text style={[styles.epTitle, (focused || pressed) && styles.epTitleFocused]} numberOfLines={1}>
+                          {ep.numero}. {ep.nome} {!hasLink && "(Em breve)"}
                         </Text>
                         <Text style={styles.epSinopse} numberOfLines={2}>
                           {ep.sinopse || 'Sem sinopse disponível para este episódio.'}
                         </Text>
                       </View>
-                      {focused && <View style={styles.epFocusBorder} />}
+                      {/* Borda extra ao focar/pressionar */}
+                      {(focused || pressed) && <View style={styles.epFocusBorder} />}
                     </>
                   )}
                 </Pressable>
@@ -415,10 +486,16 @@ export default function AnimeScreen() {
             <Text style={styles.modalTitle}>Marcar como assistido?</Text>
             <Text style={styles.modalSubtitle}>"{episodioEmExecucao?.nome}"</Text>
             <View style={styles.modalButtonContainer}>
-              <Pressable style={({ focused }) => [styles.modalButton, focused && styles.modalButtonFocused]} onPress={() => setModalVisible(false)}>
+              <Pressable 
+                style={({ focused, pressed }) => [styles.modalButton, (focused || pressed) && styles.modalButtonFocused]} 
+                onPress={() => setModalVisible(false)}
+              >
                 <Text style={styles.modalButtonText}>Cancelar</Text>
               </Pressable>
-              <Pressable style={({ focused }) => [styles.modalButton, styles.modalButtonConfirm, focused && styles.modalButtonFocused]} onPress={marcarComoAssistido}>
+              <Pressable 
+                style={({ focused, pressed }) => [styles.modalButton, styles.modalButtonConfirm, (focused || pressed) && styles.modalButtonFocused]} 
+                onPress={marcarComoAssistido}
+              >
                 <Text style={styles.modalButtonText}>Sim, marcar</Text>
               </Pressable>
             </View>
@@ -441,10 +518,9 @@ const styles = StyleSheet.create({
   mainScroll: { flex: 1 },
   mainScrollContent: { flexGrow: 1 },
   
-  // LAYOUT DO HEADER (DUAS COLUNAS)
   headerContainer: {
     flexDirection: 'row',
-    paddingTop: screenHeight * 0.15, // Pouco mais alto para caber a capa
+    paddingTop: screenHeight * 0.15,
     paddingHorizontal: 50,
     paddingBottom: 40,
     justifyContent: 'space-between',
@@ -456,12 +532,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerRight: {
-    width: 250, // Largura do poster
+    width: 250,
     justifyContent: 'flex-end',
   },
   animePoster: {
     width: 250,
-    height: 375, // Aspect ratio padrão 2:3 de posters
+    height: 375,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#333',
@@ -472,19 +548,16 @@ const styles = StyleSheet.create({
   metaNota: { fontSize: 18, color: COLORS.accent, fontWeight: 'bold' },
   metaNotaType: { fontSize: 5, color: COLORS.accent, fontWeight: 'bold' },
   metaText: { fontSize: 16, color: COLORS.textSec },
-  metaBadge: { backgroundColor: '#333', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  metaBadgeText: { color: COLORS.textRef, fontSize: 14, fontWeight: 'bold' },
   animeDescription: { fontSize: 18, color: COLORS.textSec, lineHeight: 26, marginBottom: 10 },
   genresText: { fontSize: 14, color: COLORS.textSec, fontStyle: 'italic', marginBottom: 25 },
   
-  // BOTÃO ASSISTIR DINÂMICO
   btnAssistirDinamico: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 12,
     alignItems: 'center',
     padding: 8,
-    width: 500, // Largura fixa para ficar bonito na TV
+    width: 500,
     borderWidth: 2,
     borderColor: 'transparent',
   },
@@ -492,6 +565,9 @@ const styles = StyleSheet.create({
     borderColor: COLORS.textRef,
     transform: [{ scale: 1.05 }],
     backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  btnAssistirDinamicoDisabled: {
+    opacity: 0.5, // Botão de cima fica opaco se não tiver link
   },
   btnAssistirImg: {
     width: 100,
@@ -530,23 +606,26 @@ const styles = StyleSheet.create({
   btnAssistirPlayIcon: {
     color: '#FFF',
     fontSize: 18,
-    marginLeft: 3, // Centraliza o ícone de play visualmente
+    marginLeft: 3,
   },
 
   contentSection: { backgroundColor: COLORS.bg, paddingHorizontal: 50, marginTop: -20, paddingTop: 20 },
   seasonsContainer: { marginBottom: 20 },
   sectionTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.textRef, marginBottom: 15 },
   seasonsListContent: { gap: 10, paddingVertical: 5 },
-  seasonButton: { width: 70, height: 45, backgroundColor: COLORS.bgCard, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
+  seasonButton: { minWidth: 70, paddingHorizontal: 15, height: 45, backgroundColor: COLORS.bgCard, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
   seasonButtonSelected: { backgroundColor: COLORS.primary },
   seasonButtonFocused: { borderColor: COLORS.textRef, transform: [{ scale: 1.1 }], backgroundColor: COLORS.bgCardFocused },
   seasonButtonText: { fontSize: 18, fontWeight: 'bold', color: COLORS.textSec },
   seasonButtonTextSelected: { color: '#000' },
   seasonButtonTextFocused: { color: COLORS.textRef },
   episodesContainer: { gap: 15 },
+  
   epCard: { flexDirection: 'row', backgroundColor: COLORS.bgCard, borderRadius: 12, overflow: 'hidden', height: 110, alignItems: 'center', position: 'relative' },
   epCardFocused: { backgroundColor: COLORS.bgCardFocused, transform: [{ scale: 1.02 }] },
   epCardAssistido: { opacity: 0.5 },
+  epCardDisabled: { opacity: 0.35 }, // Nova classe de estilo para os episódios desativados
+  
   epFocusBorder: { ...StyleSheet.absoluteFillObject, borderWidth: 3, borderColor: COLORS.textRef, borderRadius: 12 },
   epThumbnailWrapper: { width: 180, height: '100%', position: 'relative' },
   epThumbnail: { width: '100%', height: '100%' },
@@ -554,10 +633,13 @@ const styles = StyleSheet.create({
   epDurationText: { color: COLORS.textRef, fontSize: 12, fontWeight: 'bold' },
   epCheckBadge: { position: 'absolute', top: 5, left: 5, backgroundColor: COLORS.success, width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   epCheckText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  epDigitalBadge: { position: 'absolute', top: 5, right: 5, backgroundColor: COLORS.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  epDigitalText: { color: '#000', fontSize: 10, fontWeight: 'bold' },
   epTextContainer: { flex: 1, paddingHorizontal: 20, justifyContent: 'center' },
   epTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.textRef, marginBottom: 5 },
   epTitleFocused: { color: COLORS.primary },
   epSinopse: { fontSize: 14, color: COLORS.textSec, lineHeight: 20 },
+  
   modalBackground: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.9)', justifyContent: 'center', alignItems: 'center' },
   modalContainer: { width: 500, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 35, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
   modalTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.textRef, marginBottom: 10 },

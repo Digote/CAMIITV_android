@@ -1,6 +1,12 @@
 eas build --profile development --platform android
 
+apk de desenvolvimento
 npx eas build --profile development_tv --platform android
+
+
+criar apk
+npx eas build --profile preview_tv --platform android
+
 
 rodar
 npx expo start
