@@ -1,9 +1,11 @@
+// components/BDUI/LandscapeSection.tsx
 import React from 'react';
 import { FlatList, StyleSheet, Text, View, Pressable, Image, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 
 export default function LandscapeSection({ title, data }) {
   const router = useRouter();
+  
   return (
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -12,9 +14,17 @@ export default function LandscapeSection({ title, data }) {
         data={data}
         keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16 }}
+        
+        // --- MODIFICAÇÕES AQUI ---
+        // 1. Desativa o corte agressivo da lista
+        removeClippedSubviews={false} 
+        // 2. Trocamos o marginVertical do container por paddingVertical aqui dentro
+        contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 16 }}
+        // -------------------------
+
         renderItem={({ item }) => (
           <Pressable
+            focusable={true} // <-- ADICIONADO: Importante para o controle da TV reconhecer
             onPress={() => router.push(`/anime/${item.id}`)}
             style={({ focused }) => [
               styles.cardContainer,
@@ -43,7 +53,8 @@ export default function LandscapeSection({ title, data }) {
 }
 
 const styles = StyleSheet.create({
-  container: { marginVertical: 16 },
+  // REMOVIDO: marginVertical: 16 (passou a ser paddingVertical na FlatList)
+  container: { }, 
   sectionTitle: { 
     fontSize: 14, 
     marginLeft: 16, 
@@ -52,25 +63,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold' 
   },
   cardContainer: {
-    // A largura define o tamanho do card todo. A altura vai se ajustar para caber imagem + texto.
     width: Platform.OS === 'android' && Platform.isTV ? 260 : 200,
     marginRight: 16,
     borderRadius: 8,
   },
   cardFocused: {
-    transform: [{ scale: 1.05 }],
-    // Removemos a elevação daqui para focar o destaque visual na borda da imagem e na cor do texto
+    transform: [{ scale: 1.05 }], // Como o scale aqui é maior (1.05), o padding é ainda mais essencial
+    zIndex: 1, // <-- ADICIONADO: Garante que o card ampliado não fique por baixo dos itens vizinhos
   },
   image: {
     width: '100%',
-    height: Platform.OS === 'android' && Platform.isTV ? 146 : 112, // Proporção 16:9 mantida
+    height: Platform.OS === 'android' && Platform.isTV ? 146 : 112,
     borderRadius: 8,
     borderWidth: 2,
     borderColor: 'transparent',
-    backgroundColor: '#1A1A1A', // Fundo de placeholder
+    backgroundColor: '#1A1A1A',
   },
   imageFocused: {
-    borderColor: '#3399FF', // Borda azul apenas na imagem ao focar
+    borderColor: '#3399FF',
   },
   animeTitle: {
     marginTop: 8,
@@ -80,7 +90,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   titleFocused: {
-    color: '#FFF', // O texto fica branco (acende) quando o card está focado
+    color: '#FFF',
     fontWeight: 'bold',
   }
 });

@@ -5,7 +5,9 @@ import { useRouter } from 'expo-router';
 
 export default function ContinueWatchingSection({ title, data }) {
   const router = useRouter();
+  
   return (
+    // REMOVIDO: marginVertical: 16 daqui
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <FlatList
@@ -13,9 +15,17 @@ export default function ContinueWatchingSection({ title, data }) {
         data={data}
         keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16 }}
+        
+        // --- MODIFICAÇÕES AQUI ---
+        // 1. removeClippedSubviews={false} impede que a lista corte o item escalado
+        removeClippedSubviews={false} 
+        // 2. Adicionamos paddingVertical para dar "respiro" para o zoom no topo/base
+        contentContainerStyle={styles.flatListContent}
+        // -------------------------
+
         renderItem={({ item }) => (
           <Pressable
+            focusable={true}
             onPress={() => router.push(`/anime/${item.id}`)}
             style={({ focused }) => [
               styles.card,
@@ -30,10 +40,6 @@ export default function ContinueWatchingSection({ title, data }) {
                     {item.title}
                   </Text>
                   <Text style={styles.episodeText}>{item.episode}</Text>
-                  {/* Barra de Progresso */}
-                  {/* <View style={styles.progressBarBackground}>
-                    <View style={[styles.progressBarFill, { width: `${item.progress * 100}%` }]} />
-                  </View> */}
                 </View>
               </View>
             )}
@@ -45,19 +51,32 @@ export default function ContinueWatchingSection({ title, data }) {
 }
 
 const styles = StyleSheet.create({
-  container: { marginVertical: 16 },
+  // Container principal agora sem margem vertical
+  container: { /* marginVertical: 16 removido daqui */ },
   sectionTitle: { fontSize: 14, marginLeft: 16, marginBottom: 12, color: '#888', fontWeight: 'bold' },
+  
+  // Novo estilo para o conteúdo da FlatList
+  flatListContent: {
+    paddingHorizontal: 16,
+    // Adicionamos espaço extra em cima e embaixo para o zoom. 
+    // Como o marginVertical original era 16, usar paddingVertical: 16 mantém o layout consistente.
+    paddingVertical: 16, 
+  },
+
   card: {
     width: Platform.OS === 'android' && Platform.isTV ? 280 : 240,
     marginRight: 16,
     borderRadius: 8,
     backgroundColor: '#1A1A1A',
-    overflow: 'hidden',
+    // overflow: 'hidden', <-- Mantenha isso comentado/removido como na resposta anterior
   },
   cardFocused: {
-    borderColor: '#3399FF', // Azul do botão focado no print
+    borderColor: '#3399FF', 
     borderWidth: 2,
     transform: [{ scale: 1.02 }],
+    // Dependendo de como o Android TV renderiza, às vezes ajuda 
+    // adicionar uma elevação zIndex no item focado para ele ficar "por cima" dos outros
+    zIndex: 1, 
   },
   cardInner: {
     flexDirection: 'row',
@@ -67,7 +86,7 @@ const styles = StyleSheet.create({
   image: {
     width: 100,
     height: 56,
-    borderRadius: 4,
+    borderRadius: 4, 
   },
   infoContainer: {
     flex: 1,
@@ -77,15 +96,4 @@ const styles = StyleSheet.create({
   title: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
   textFocused: { color: '#FFF' },
   episodeText: { color: '#AAA', fontSize: 12, marginTop: 2 },
-  progressBarBackground: {
-    height: 4,
-    backgroundColor: '#333',
-    borderRadius: 2,
-    marginTop: 8,
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#3399FF', // Azul da barra de progresso
-    borderRadius: 2,
-  }
 });

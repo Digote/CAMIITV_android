@@ -9,6 +9,7 @@ import {
   View,
   AppState,
   Modal,
+  Animated
 } from 'react-native';
 
 import { useLocalSearchParams } from 'expo-router';
@@ -29,6 +30,56 @@ const COLORS = {
   accent: '#f39c12',
   success: '#4caf50',
   border: '#333333',
+};
+
+const SeasonItem = ({ item, isSelected, onSelectSeason, setFocusedIndex, index }) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handleFocus = () => {
+    setFocusedIndex(index);
+    onSelectSeason(item.id);
+    // Animação suave ao receber o foco
+    Animated.spring(scaleAnim, { toValue: 1.1, useNativeDriver: true, speed: 20 }).start();
+  };
+
+  const handleBlur = () => {
+    setFocusedIndex(null);
+    // Volta ao tamanho normal
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
+  };
+
+  return (
+    <Pressable
+      focusable={true}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onPress={() => {
+        setFocusedIndex(index);
+        onSelectSeason(item.id);
+      }}
+      // Este padding em volta garante que a borda não seja cortada quando o item crescer
+      style={{ paddingVertical: 10, paddingHorizontal: 5 }} 
+    >
+      {({ focused, pressed }) => (
+        <Animated.View
+          style={[
+            styles.seasonButton,
+            isSelected && styles.seasonButtonSelected,
+            (focused || pressed) && styles.seasonButtonFocused,
+            { transform: [{ scale: scaleAnim }] } // O zoom entra aqui de forma animada
+          ]}
+        >
+          <Text style={[
+            styles.seasonButtonText,
+            isSelected && styles.seasonButtonTextSelected,
+            (focused || pressed) && styles.seasonButtonTextFocused
+          ]}>
+            {item.numero === 'Digital' ? 'Digital' : `T${item.numero}`}
+          </Text>
+        </Animated.View>
+      )}
+    </Pressable>
+  );
 };
 
 export default function AnimeScreen() {
@@ -380,42 +431,16 @@ export default function AnimeScreen() {
           <View style={styles.seasonsContainer}>
             <Text style={styles.sectionTitle}>Episódios</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonsListContent}>
-              {temporadas.map((item, index) => {
-                const isSelected = selectedTemporadaId === item.id;
-                return (
-                  <Pressable
-                    key={item.id}
-                    focusable={true}
-                    // AÇÕES PARA TV (Foco)
-                    onFocus={() => {
-                      setSeasonFocusedIndex(index);
-                      handleSelectTemporada(item.id);
-                    }}
-                    onBlur={() => setSeasonFocusedIndex(null)}
-                    // ADICIONADO: AÇÃO PARA CELULAR (Toque)
-                    onPress={() => {
-                      setSeasonFocusedIndex(index);
-                      handleSelectTemporada(item.id);
-                    }}
-                    // ADICIONADO: "pressed" no estilo
-                    style={({ focused, pressed }) => [
-                      styles.seasonButton,
-                      isSelected && styles.seasonButtonSelected,
-                      (focused || pressed) && styles.seasonButtonFocused
-                    ]}
-                  >
-                    {({ focused, pressed }) => (
-                      <Text style={[
-                        styles.seasonButtonText,
-                        isSelected && styles.seasonButtonTextSelected,
-                        (focused || pressed) && styles.seasonButtonTextFocused
-                      ]}>
-                        {item.numero === 'Digital' ? 'Digital' : `T${item.numero}`}
-                      </Text>
-                    )}
-                  </Pressable>
-                );
-              })}
+              {temporadas.map((item, index) => (
+                <SeasonItem
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  isSelected={selectedTemporadaId === item.id}
+                  onSelectSeason={handleSelectTemporada}
+                  setFocusedIndex={setSeasonFocusedIndex}
+                />
+              ))}
             </ScrollView>
           </View>
 
@@ -615,7 +640,7 @@ const styles = StyleSheet.create({
   seasonsListContent: { gap: 10, paddingVertical: 5 },
   seasonButton: { minWidth: 70, paddingHorizontal: 15, height: 45, backgroundColor: COLORS.bgCard, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
   seasonButtonSelected: { backgroundColor: COLORS.primary },
-  seasonButtonFocused: { borderColor: COLORS.textRef, transform: [{ scale: 1.1 }], backgroundColor: COLORS.bgCardFocused },
+  seasonButtonFocused: { borderColor: COLORS.textRef, backgroundColor: COLORS.bgCardFocused },
   seasonButtonText: { fontSize: 18, fontWeight: 'bold', color: COLORS.textSec },
   seasonButtonTextSelected: { color: '#000' },
   seasonButtonTextFocused: { color: COLORS.textRef },
