@@ -12,6 +12,8 @@ export default function RootLayout() {
         {/* <Stack.Screen name="(drawer)" options={{ headerShown: false }} /> */}
         <Stack.Screen name="index" options={{ headerShown: false,}} />
         <Stack.Screen name="perfil" options={{ headerShown: false,}} />
+        <Stack.Screen name="seasons" options={{ headerShown: false,}} />
+        <Stack.Screen name="an" options={{ headerShown: false,}} />
 
         {/* Rota dinâmica fica aqui, fora das abas */}
         <Stack.Screen name="anime/[id]" options={{ headerShown: false, title: 'Detalhes' }}/>

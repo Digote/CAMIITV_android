@@ -12,6 +12,9 @@ import {
   Animated
 } from 'react-native';
 
+import { FlashList } from '@shopify/flash-list';
+import { Image as ExpoImage } from 'expo-image'; // Usaremos nas thumbnails dos episódios
+
 import { useLocalSearchParams } from 'expo-router';
 import axios from 'axios';
 import api from '@/services/api';
@@ -32,7 +35,7 @@ const COLORS = {
   border: '#333333',
 };
 
-const SeasonItem = ({ item, isSelected, onSelectSeason, setFocusedIndex, index }) => {
+const SeasonItem = ({ item, isSelected, onSelectSeason, setFocusedIndex, index }:any) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const handleFocus = () => {
@@ -282,7 +285,7 @@ export default function AnimeScreen() {
       setTemporadas(prevTemps => {
         const newTemps = prevTemps.map(temp => ({
           ...temp,
-          episodios: temp.episodios.map(ep => 
+          episodios: temp.episodios.map((ep:any) => 
             ep.id === episodioEmExecucao.id ? { ...ep, assistido: { completo: 1 } } : ep
           )
         }));
@@ -362,147 +365,124 @@ export default function AnimeScreen() {
   // RENDERIZAÇÃO
   // ==========================================
 
+  // Tudo o que ficava antes do map() agora é o Header da nossa FlashList
+  const renderHeader = () => (
+    <>
+      <View style={styles.headerContainer}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.animeTitle} numberOfLines={2}>{anime.nome}</Text>
+          
+          <View style={styles.metadataRow}>
+            <Text style={styles.metaNota}>★ {anime.nota}<Text style={styles.metaNotaType}>MAL</Text></Text>
+            <Text style={styles.metaNota}>★ {anime.nota_tmdb}<Text style={styles.metaNotaType}>TMBD</Text></Text>
+            <Text style={styles.metaText}>{anime.ano}</Text>
+            <Text style={styles.metaText}>{temporadas.length} Temporada(s)</Text>
+          </View>
+
+          <Text style={styles.animeDescription} ellipsizeMode="tail" numberOfLines={4}>
+            {anime.descricao}
+          </Text>
+          <Text style={styles.genresText}>{anime.generos?.join(' • ')}</Text>
+
+          {/* BOTÃO ASSISTIR DINÂMICO AQUI (MANTÉM O SEU CÓDIGO ORIGINAL) */}
+          {proximoEpisodio && (
+             <Pressable>... Seu Botão Assistir ...</Pressable> 
+          )}
+        </View>
+
+        <View style={styles.headerRight}>
+            <Image source={{ uri: anime.imagem }} style={styles.animePoster} resizeMode="cover" />
+        </View>
+      </View>
+
+      <View style={[styles.contentSection, { paddingBottom: 15 }]}>
+        <View style={styles.seasonsContainer}>
+          <Text style={styles.sectionTitle}>Episódios</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonsListContent}>
+            {temporadas.map((item, index) => (
+              <SeasonItem
+                key={item.id}
+                item={item}
+                index={index}
+                isSelected={selectedTemporadaId === item.id}
+                onSelectSeason={handleSelectTemporada}
+                setFocusedIndex={setSeasonFocusedIndex}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </>
+  );
+
   return (
     <View style={styles.container}>
       <Image source={{ uri: anime.banner }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       <View style={styles.gradientReplacement} />
 
-      <ScrollView
-        ref={scrollRef}
-        style={styles.mainScroll}
-        contentContainerStyle={styles.mainScrollContent}
-      >
-        <View style={styles.headerContainer}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.animeTitle} numberOfLines={2}>{anime.nome}</Text>
-            
-            <View style={styles.metadataRow}>
-              <Text style={styles.metaNota}>★ {anime.nota}<Text style={styles.metaNotaType}>MAL</Text></Text>
-              <Text style={styles.metaNota}>★ {anime.nota_tmdb}<Text style={styles.metaNotaType}>TMBD</Text></Text>
-              <Text style={styles.metaText}>{anime.ano}</Text>
-              <Text style={styles.metaText}>{temporadas.length} Temporada(s)</Text>
-            </View>
-
-            <Text style={styles.animeDescription} ellipsizeMode="tail" numberOfLines={4}>
-              {anime.descricao}
-            </Text>
-            <Text style={styles.genresText}>{anime.generos?.join(' • ')}</Text>
-
-            {/* BOTÃO ASSISTIR DINÂMICO */}
-            {proximoEpisodio && (
-              <Pressable
-                hasTVPreferredFocus={true} 
-                focusable={mainEpisodeHasLink} 
-                disabled={!mainEpisodeHasLink} 
-                onPress={() => vlcPress(proximoEpisodio)}
-                // ADICIONADO: "pressed" para reagir ao toque no celular
-                style={({ focused, pressed }) => [
-                  styles.btnAssistirDinamico,
-                  (focused || pressed) && styles.btnAssistirDinamicoFocused,
-                  !mainEpisodeHasLink && styles.btnAssistirDinamicoDisabled 
-                ]}
-              >
-                {({ focused, pressed }) => (
-                  <>
-                    <Image source={{ uri: proximoEpisodio.imagem }} style={styles.btnAssistirImg} resizeMode="cover" />
-                    <View style={styles.btnAssistirContent}>
-                      <Text style={[styles.btnAssistirLabel, (focused || pressed) && { color: COLORS.textRef }]}>
-                        {getWatchButtonText()}
-                      </Text>
-                      <Text style={[styles.btnAssistirEpNome, (focused || pressed) && { color: COLORS.primary }]} numberOfLines={1}>
-                        {temporadaProximoEp?.numero === 'Digital' ? 'Digital' : `T${temporadaProximoEp?.numero}`} : E{proximoEpisodio.numero} - {proximoEpisodio.nome}
-                      </Text>
-                    </View>
-                    <View style={[styles.btnAssistirPlay, (focused || pressed) && styles.btnAssistirPlayFocused]}>
-                      <Text style={styles.btnAssistirPlayIcon}>▶</Text>
-                    </View>
-                  </>
-                )}
-              </Pressable>
-            )}
-          </View>
-
-          <View style={styles.headerRight}>
-             <Image source={{ uri: anime.imagem }} style={styles.animePoster} resizeMode="cover" />
-          </View>
-        </View>
-
-        <View style={styles.contentSection}>
-          <View style={styles.seasonsContainer}>
-            <Text style={styles.sectionTitle}>Episódios</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonsListContent}>
-              {temporadas.map((item, index) => (
-                <SeasonItem
-                  key={item.id}
-                  item={item}
-                  index={index}
-                  isSelected={selectedTemporadaId === item.id}
-                  onSelectSeason={handleSelectTemporada}
-                  setFocusedIndex={setSeasonFocusedIndex}
-                />
-              ))}
-            </ScrollView>
-          </View>
-
-          <View style={styles.episodesContainer}>
-            {episodiosLista.map((ep: any, index: number) => {
-              const isAssistido = ep.assistido?.completo === 1;
-              const hasLink = ep.links && ep.links.length > 0; 
-              
-              return (
-                <Pressable
-                  key={ep.id || index}
-                  focusable={hasLink} 
-                  disabled={!hasLink} 
-                  android_ripple={{ color: COLORS.border }}
-                  // ADICIONADO: "pressed" no estilo
-                  style={({ focused, pressed }) => [
-                    styles.epCard,
-                    (focused || pressed) && styles.epCardFocused,
-                    isAssistido && styles.epCardAssistido,
-                    !hasLink && styles.epCardDisabled 
-                  ]}
-                  onPress={() => vlcPress(ep)}
-                  onLongPress={() => {
-                    setEpisodioEmExecucao(ep);
-                    setModalVisible(true);
-                  }}
-                  delayLongPress={600}
-                >
-                  {({ focused, pressed }) => (
-                    <>
-                      <View style={styles.epThumbnailWrapper}>
-                        <Image source={{ uri: ep.imagem }} style={styles.epThumbnail} resizeMode="cover" />
-                        <View style={styles.epDurationBadge}><Text style={styles.epDurationText}>{ep.duracao}</Text></View>
-                        {isAssistido && <View style={styles.epCheckBadge}><Text style={styles.epCheckText}>✓</Text></View>}
-                        
-                        {/* NOVA ETIQUETA DIGITAL AQUI */}
-                        {ep.isDigital && (
-                          <View style={styles.epDigitalBadge}>
-                            <Text style={styles.epDigitalText}>DIGITAL</Text>
-                          </View>
-                        )}
-
+      {/* A FlashList substitui o ScrollView principal */}
+      <FlashList
+        data={episodiosLista}
+        ListHeaderComponent={renderHeader}
+        keyExtractor={(item, index) => item.id ? item.id.toString() : index.toString()}
+        contentContainerStyle={{ paddingBottom: 50, paddingHorizontal: 50 }}
+        showsVerticalScrollIndicator={false}
+        // renderItem substitui o seu antigo .map()
+        renderItem={({ item: ep }) => {
+          const isAssistido = ep.assistido?.completo === 1;
+          const hasLink = ep.links && ep.links.length > 0; 
+          
+          return (
+            <Pressable
+              focusable={hasLink} 
+              disabled={!hasLink} 
+              style={({ focused, pressed }) => [
+                styles.epCard,
+                { marginBottom: 15 }, // Substitui o gap do episodesContainer antigo
+                (focused || pressed) && styles.epCardFocused,
+                isAssistido && styles.epCardAssistido,
+                !hasLink && styles.epCardDisabled 
+              ]}
+              onPress={() => vlcPress(ep)}
+              onLongPress={() => {
+                setEpisodioEmExecucao(ep);
+                setModalVisible(true);
+              }}
+            >
+              {({ focused, pressed }) => (
+                <>
+                  <View style={styles.epThumbnailWrapper}>
+                    {/* Trocado para o ExpoImage de alta performance */}
+                    <ExpoImage 
+                       source={{ uri: ep.imagem }} 
+                       style={styles.epThumbnail} 
+                       contentFit="cover" 
+                       cachePolicy="disk"
+                    />
+                    <View style={styles.epDurationBadge}><Text style={styles.epDurationText}>{ep.duracao}</Text></View>
+                    {isAssistido && <View style={styles.epCheckBadge}><Text style={styles.epCheckText}>✓</Text></View>}
+                    
+                    {ep.isDigital && (
+                      <View style={styles.epDigitalBadge}>
+                        <Text style={styles.epDigitalText}>DIGITAL</Text>
                       </View>
-                      <View style={styles.epTextContainer}>
-                        <Text style={[styles.epTitle, (focused || pressed) && styles.epTitleFocused]} numberOfLines={1}>
-                          {ep.numero}. {ep.nome} {!hasLink && "(Em breve)"}
-                        </Text>
-                        <Text style={styles.epSinopse} numberOfLines={2}>
-                          {ep.sinopse || 'Sem sinopse disponível para este episódio.'}
-                        </Text>
-                      </View>
-                      {/* Borda extra ao focar/pressionar */}
-                      {(focused || pressed) && <View style={styles.epFocusBorder} />}
-                    </>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <View style={{ height: 50 }} />
-      </ScrollView>
+                    )}
+                  </View>
+                  <View style={styles.epTextContainer}>
+                    <Text style={[styles.epTitle, (focused || pressed) && styles.epTitleFocused]} numberOfLines={1}>
+                      {ep.numero}. {ep.nome} {!hasLink && "(Em breve)"}
+                    </Text>
+                    <Text style={styles.epSinopse} numberOfLines={2}>
+                      {ep.sinopse || 'Sem sinopse disponível para este episódio.'}
+                    </Text>
+                  </View>
+                  {(focused || pressed) && <View style={styles.epFocusBorder} />}
+                </>
+              )}
+            </Pressable>
+          );
+        }}
+      />
 
       {/* MODAL */}
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>

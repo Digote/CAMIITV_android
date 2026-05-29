@@ -1,6 +1,6 @@
 eas build --profile development --platform android
 
-apk de desenvolvimento
+apk de desenvolvimento  (quando intalar nova dependencia tem de criar um novo)
 npx eas build --profile development_tv --platform android
 
 
@@ -10,6 +10,8 @@ npx eas build --profile preview_tv --platform android
 
 rodar
 npx expo start
+
+
 
 
 exp://IP_DO_PC:8081

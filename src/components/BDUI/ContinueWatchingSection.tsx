@@ -1,8 +1,11 @@
 // components/BDUI/ContinueWatchingSection.tsx
 import React from 'react';
-import { FlatList, StyleSheet, Text, View, Pressable, Image, Platform } from 'react-native';
+import { FlatList, StyleSheet, Text, View, Pressable, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
+import { FlashList } from '@shopify/flash-list'; // 1. Importar FlashList
+import { Image } from 'expo-image'; // 2. Importar o motor de imagem otimizado
 
+// @ts-ignore
 export default function ContinueWatchingSection({ title, data }) {
   const router = useRouter();
   
@@ -34,7 +37,14 @@ export default function ContinueWatchingSection({ title, data }) {
           >
             {({ focused }) => (
               <View style={styles.cardInner}>
-                <Image source={{ uri: item.image }} style={styles.image} />
+                {/* <Image source={{ uri: item.image }} style={styles.image} /> */}
+                <Image 
+                  source={{ uri: item.image }} 
+                  style={[styles.image]} 
+                  contentFit="cover"
+                  transition={150} // Suaviza a aparição da imagem quando terminar o download
+                  cachePolicy="disk" // Força salvar as capas dos animes no armazenamento da TV
+                />
                 <View style={styles.infoContainer}>
                   <Text style={[styles.title, focused && styles.textFocused]} numberOfLines={1}>
                     {item.title}

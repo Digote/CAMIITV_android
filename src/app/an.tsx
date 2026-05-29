@@ -51,6 +51,7 @@ export default function Home() {
 
   const menuItems: MenuItem[] = [
     { icon: 'home', label: 'Início', route: '/' },
+    { icon: 'home', label: 'Temporadas', route: '/seasons' },
     { icon: 'home', label: 'AN', route: '/an' },
     { icon: 'user', label: 'Perfil', route: '/perfil' },
   ];

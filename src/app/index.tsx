@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { SafeAreaView, ScrollView, Text, View, ActivityIndicator } from 'react-native';
 import Header from '../components/Header';
 import SideMenuLayout, { MenuItem } from '../components/SideMenuLayout';
+import { FlashList } from "@shopify/flash-list";
 import api from '@/services/api';
 
 // Importando os novos componentes BDUI que criamos
@@ -32,24 +33,24 @@ export default function Home() {
   }, []);
 
   // Função que lê o "type" vindo do Laravel e decide qual componente desenhar
-  const renderSection = (section: any) => {
-    switch (section.type) {
+  const renderSection = ({ item }: { item: any }) => {
+    switch (item.type) {
       case 'HERO_CAROUSEL':
-        return <HeroSection key={section.id} data={section.data} />;
+        return <HeroSection title={item.title} data={item.data} />;
       case 'GENRE_ROW':
-        return <GenreSection key={section.id} title={section.title} data={section.data} />;
+        return <GenreSection title={item.title} data={item.data} />;
       case 'LANDSCAPE_LIST':
-        return <LandscapeSection key={section.id} title={section.title} data={section.data} />;
+        return <LandscapeSection title={item.title} data={item.data} />;
       case 'CONTINUE_WATCHING':
-        return <ContinueWatchingSection key={section.id} title={section.title} data={section.data} />;
+        return <ContinueWatchingSection title={item.title} data={item.data} />;
       default:
-        // Caso o backend mande um tipo que o app não conhece, ignoramos silenciosamente
         return null; 
     }
   };
 
   const menuItems: MenuItem[] = [
     { icon: 'home', label: 'Início', route: '/' },
+    { icon: 'home', label: 'Temporadas', route: '/seasons' },
     { icon: 'home', label: 'AN', route: '/an' },
     { icon: 'user', label: 'Perfil', route: '/perfil' },
   ];
@@ -65,14 +66,15 @@ export default function Home() {
             <Text style={{ color: '#FFF', marginTop: 16 }}>Carregando...</Text>
           </View>
         ) : (
-          <ScrollView 
-            // paddingBottom garante que o último item não fique cortado na TV
-            contentContainerStyle={{ paddingBottom: 40 }} 
+          <FlashList
+            data={layout}
+            renderItem={renderSection}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={{ paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
-          >
-            {/* O map percorre o array do Laravel e chama a função renderSection para cada item */}
-            {layout.map((section) => renderSection(section))}
-          </ScrollView>
+            removeClippedSubviews={true} // Melhora agressiva de performance no Android
+          />
+          
         )}
       </SideMenuLayout>
     </SafeAreaView>

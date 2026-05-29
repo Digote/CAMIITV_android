@@ -1,9 +1,11 @@
 // components/BDUI/LandscapeSection.tsx
 import React from 'react';
-import { FlatList, StyleSheet, Text, View, Pressable, Image, Platform } from 'react-native';
+import { FlatList, StyleSheet, Text, View, Pressable, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
+import { FlashList } from '@shopify/flash-list'; // 1. Importar FlashList
+import { Image } from 'expo-image'; // 2. Importar o motor de imagem otimizado
 
-export default function LandscapeSection({ title, data }) {
+export default function LandscapeSection({ title, data }:any) {
   const router = useRouter();
   
   return (
@@ -33,9 +35,16 @@ export default function LandscapeSection({ title, data }) {
           >
             {({ focused }) => (
               <View>
-                <Image 
+                {/* <Image 
                   source={{ uri: item.image }} 
                   style={[styles.image, focused && styles.imageFocused]} 
+                /> */}
+                <Image 
+                  source={{ uri: item.image }} 
+                   style={[styles.image, focused && styles.imageFocused]} 
+                  contentFit="cover"
+                  transition={150} // Suaviza a aparição da imagem quando terminar o download
+                  cachePolicy="disk" // Força salvar as capas dos animes no armazenamento da TV
                 />
                 <Text 
                   style={[styles.animeTitle, focused && styles.titleFocused]}

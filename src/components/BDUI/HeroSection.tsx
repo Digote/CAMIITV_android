@@ -2,13 +2,15 @@ import React, { useRef } from 'react';
 import {
   View,
   Text,
-  Image,
+  // Image,
   StyleSheet,
   Animated,
   Dimensions,
   Pressable,
   FlatList
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list'; // 1. Importar FlashList
+import { Image } from 'expo-image'; // 2. Importar o motor de imagem otimizado
 
 // 1. Calculamos o tamanho ideal para caberem vários animes na tela da TV
 const { width } = Dimensions.get('window');
@@ -16,7 +18,7 @@ const ITEM_WIDTH = width * 0.28;
 const ITEM_HEIGHT = ITEM_WIDTH * 0.5625; 
 
 // 2. Componente do Card Individual (com a animação de foco)
-const HeroItem = ({ item }) => {
+const HeroItem = ({ item }:any) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const handleFocus = () => {
@@ -49,7 +51,14 @@ const HeroItem = ({ item }) => {
             focused && styles.cardFocused,
           ]}
         >
-          <Image source={{ uri: item.banner }} style={styles.image} />
+          <Image 
+            source={{ uri: item.banner }} 
+            style={styles.image}
+            contentFit="cover"
+            transition={150} // Suaviza a aparição da imagem quando terminar o download
+            cachePolicy="disk" // Força salvar as capas dos animes no armazenamento da TV
+          />
+          {/* <Image source={{ uri: item.banner }} style={styles.image} /> */}
           
           {/* Fundo escuro para destacar o texto */}
           <View style={styles.textContainer}>
@@ -69,19 +78,21 @@ const HeroItem = ({ item }) => {
 };
 
 // 3. Componente da Seção Principal (O que você vai importar nas suas telas)
-const HeroSection = ({ title, data }) => {
+
+const HeroSection = ({ title, data }:any) => {
   return (
     <View style={styles.sectionContainer}>
       {/* Título da seção (ex: "Em Alta", "Continuar Assistindo") */}
       {title && <Text style={styles.sectionTitle}>{title}</Text>}
       
-      <FlatList
+      <FlashList
         data={data}
         horizontal
-        keyExtractor={(item, index) => item.id ? item.id.toString() : index.toString()}
+        keyExtractor={(item:any, index) => item.id ? item.id.toString() : index.toString()}
         renderItem={({ item }) => <HeroItem item={item} />}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
+        removeClippedSubviews={true} // Evita carregar imagens de cards muito distantes à direita
       />
     </View>
   );

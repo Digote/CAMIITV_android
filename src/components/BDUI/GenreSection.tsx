@@ -1,7 +1,9 @@
 import React from 'react';
 import { FlatList, StyleSheet, Text, View, Pressable, Platform } from 'react-native';
+import { FlashList } from '@shopify/flash-list'; // 1. Importar FlashList
+import { Image } from 'expo-image'; // 2. Importar o motor de imagem otimizado
 
-export default function GenreSection({ title, data }) {
+export default function GenreSection({ title, data }:any) {
   return (
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>{title}</Text>
