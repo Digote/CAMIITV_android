@@ -9,7 +9,8 @@ import {
   View,
   AppState,
   Modal,
-  Animated
+  Animated,
+  findNodeHandle
 } from 'react-native';
 
 import { FlashList } from '@shopify/flash-list';
@@ -35,25 +36,34 @@ const COLORS = {
   border: '#333333',
 };
 
-const SeasonItem = ({ item, isSelected, onSelectSeason, setFocusedIndex, index }:any) => {
+const SeasonItem = ({ item, isSelected, onSelectSeason, setFocusedIndex, index, btnAssistirRef }: any) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  
+  // Estado para guardar o ID nativo do botão Assistir
+  const [assistirNodeId, setAssistirNodeId] = useState<number | null>(null);
+
+  // Assim que o componente carregar, pegamos o ID numérico nativo do botão Assistir
+  useEffect(() => {
+    if (btnAssistirRef && btnAssistirRef.current) {
+      setAssistirNodeId(findNodeHandle(btnAssistirRef.current));
+    }
+  }, [btnAssistirRef]);
 
   const handleFocus = () => {
     setFocusedIndex(index);
     onSelectSeason(item.id);
-    // Animação suave ao receber o foco
     Animated.spring(scaleAnim, { toValue: 1.1, useNativeDriver: true, speed: 20 }).start();
   };
 
   const handleBlur = () => {
     setFocusedIndex(null);
-    // Volta ao tamanho normal
     Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
   };
 
   return (
     <Pressable
       focusable={true}
+      nextFocusUp={assistirNodeId || undefined}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onPress={() => {
@@ -91,6 +101,7 @@ export default function AnimeScreen() {
   // REFERÊNCIAS
   const scrollRef = useRef<ScrollView>(null);
   const appState = useRef(AppState.currentState);
+  const btnAssistirRef = useRef(null);
 
   // ESTADOS DE DADOS
   const [anime, setAnime] = useState<any>({});
@@ -387,7 +398,8 @@ export default function AnimeScreen() {
           {/* BOTÃO ASSISTIR DINÂMICO AQUI (MANTÉM O SEU CÓDIGO ORIGINAL) */}
           {proximoEpisodio && (
             <Pressable
-              hasTVPreferredFocus={true} 
+              // hasTVPreferredFocus={true}
+              ref={btnAssistirRef}
               focusable={mainEpisodeHasLink} 
               disabled={!mainEpisodeHasLink} 
               onPress={() => vlcPress(proximoEpisodio)}
@@ -423,10 +435,10 @@ export default function AnimeScreen() {
         </View>
       </View>
 
-      <View style={[styles.contentSection, { paddingBottom: 15 }]}>
-        <View style={styles.seasonsContainer}>
+      <View style={[styles.contentSection, { paddingBottom: 15 }]} focusable={false}>
+        <View style={styles.seasonsContainer} focusable={false}>
           <Text style={styles.sectionTitle}>Episódios</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonsListContent}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} focusable={false} contentContainerStyle={styles.seasonsListContent}>
             {temporadas.map((item, index) => (
               <SeasonItem
                 key={item.id}
@@ -435,6 +447,7 @@ export default function AnimeScreen() {
                 isSelected={selectedTemporadaId === item.id}
                 onSelectSeason={handleSelectTemporada}
                 setFocusedIndex={setSeasonFocusedIndex}
+                btnAssistirRef={btnAssistirRef}
               />
             ))}
           </ScrollView>
@@ -452,62 +465,71 @@ export default function AnimeScreen() {
       <FlashList
         data={episodiosLista}
         ListHeaderComponent={renderHeader}
-        keyExtractor={(item, index) => item.id ? item.id.toString() : index.toString()}
-        contentContainerStyle={{ paddingBottom: 50, paddingHorizontal: 50 }}
+        drawDistance={1500}
+        // estimatedItemSize={125}
+        // keyExtractor={(item, index) => item.id ? item.id.toString() : index.toString()}
+        keyExtractor={(item, index) => item.id || `fallback-${index}`}
+        // 1. Removemos o paddingHorizontal daqui para não duplicar no header nem vazar o fundo
+        contentContainerStyle={{ paddingBottom: 0 }} 
         showsVerticalScrollIndicator={false}
-        // renderItem substitui o seu antigo .map()
+        // 2. Adicionamos o rodapé preto para o respiro final da rolagem
+        ListFooterComponent={<View style={{ height: 50, backgroundColor: COLORS.bg }} />}
+        
         renderItem={({ item: ep }) => {
           const isAssistido = ep.assistido?.completo === 1;
           const hasLink = ep.links && ep.links.length > 0; 
           
           return (
-            <Pressable
-              focusable={hasLink} 
-              disabled={!hasLink} 
-              style={({ focused, pressed }) => [
-                styles.epCard,
-                { marginBottom: 15 }, // Substitui o gap do episodesContainer antigo
-                (focused || pressed) && styles.epCardFocused,
-                isAssistido && styles.epCardAssistido,
-                !hasLink && styles.epCardDisabled 
-              ]}
-              onPress={() => vlcPress(ep)}
-              onLongPress={() => {
-                setEpisodioEmExecucao(ep);
-                setModalVisible(true);
-              }}
-            >
-              {({ focused, pressed }) => (
-                <>
-                  <View style={styles.epThumbnailWrapper}>
-                    {/* Trocado para o ExpoImage de alta performance */}
-                    <ExpoImage 
-                       source={{ uri: ep.imagem }} 
-                       style={styles.epThumbnail} 
-                       contentFit="cover" 
-                       cachePolicy="disk"
-                    />
-                    <View style={styles.epDurationBadge}><Text style={styles.epDurationText}>{ep.duracao}</Text></View>
-                    {isAssistido && <View style={styles.epCheckBadge}><Text style={styles.epCheckText}>✓</Text></View>}
-                    
-                    {ep.isDigital && (
-                      <View style={styles.epDigitalBadge}>
-                        <Text style={styles.epDigitalText}>DIGITAL</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.epTextContainer}>
-                    <Text style={[styles.epTitle, (focused || pressed) && styles.epTitleFocused]} numberOfLines={1}>
-                      {ep.numero}. {ep.nome} {!hasLink && "(Em breve)"}
-                    </Text>
-                    <Text style={styles.epSinopse} numberOfLines={2}>
-                      {ep.sinopse || 'Sem sinopse disponível para este episódio.'}
-                    </Text>
-                  </View>
-                  {(focused || pressed) && <View style={styles.epFocusBorder} />}
-                </>
-              )}
-            </Pressable>
+            // 3. Envolvemos o card em uma View que continua a section preta com o padding de 50
+            <View style={{ backgroundColor: COLORS.bg, paddingHorizontal: 50 }}>
+              <Pressable
+                focusable={hasLink} 
+                disabled={!hasLink}
+                style={({ focused, pressed }) => [
+                  styles.epCard,
+                  { marginBottom: 15 }, // O espaçamento (gap) volta a funcionar em cima do fundo preto
+                  (focused || pressed) && styles.epCardFocused,
+                  isAssistido && styles.epCardAssistido,
+                  !hasLink && styles.epCardDisabled 
+                ]}
+                onPress={() => vlcPress(ep)}
+                onLongPress={() => {
+                  setEpisodioEmExecucao(ep);
+                  setModalVisible(true);
+                }}
+              >
+                {({ focused, pressed }) => (
+                  <>
+                    <View style={styles.epThumbnailWrapper}>
+                      <ExpoImage 
+                         source={{ uri: ep.imagem }} 
+                         style={styles.epThumbnail} 
+                         contentFit="cover" 
+                         cachePolicy="disk"
+                         transition={0}
+                      />
+                      <View style={styles.epDurationBadge}><Text style={styles.epDurationText}>{ep.duracao}</Text></View>
+                      {isAssistido && <View style={styles.epCheckBadge}><Text style={styles.epCheckText}>✓</Text></View>}
+                      
+                      {ep.isDigital && (
+                        <View style={styles.epDigitalBadge}>
+                          <Text style={styles.epDigitalText}>DIGITAL</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.epTextContainer}>
+                      <Text style={[styles.epTitle, (focused || pressed) && styles.epTitleFocused]} numberOfLines={1}>
+                        {ep.numero}. {ep.nome} {!hasLink && "(Em breve)"}
+                      </Text>
+                      <Text style={styles.epSinopse} numberOfLines={2}>
+                        {ep.sinopse || 'Sem sinopse disponível para este episódio.'}
+                      </Text>
+                    </View>
+                    {(focused || pressed) && <View style={styles.epFocusBorder} />}
+                  </>
+                )}
+              </Pressable>
+            </View>
           );
         }}
       />
@@ -642,7 +664,7 @@ const styles = StyleSheet.create({
     marginLeft: 3,
   },
 
-  contentSection: { backgroundColor: COLORS.bg, paddingHorizontal: 50, marginTop: -20, paddingTop: 20 },
+  contentSection: { backgroundColor: COLORS.bg, paddingHorizontal: 50,  paddingTop: 10 },
   seasonsContainer: { marginBottom: 20 },
   sectionTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.textRef, marginBottom: 15 },
   seasonsListContent: { gap: 10, paddingVertical: 5 },

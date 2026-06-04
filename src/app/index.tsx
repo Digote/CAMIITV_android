@@ -72,7 +72,9 @@ export default function Home() {
             keyExtractor={(item) => item.id.toString()}
             contentContainerStyle={{ paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
-            removeClippedSubviews={true} // Melhora agressiva de performance no Android
+            // contentContainerStyle={{ paddingBottom: 40 }}
+            // showsVerticalScrollIndicator={false}
+            // removeClippedSubviews={true} // Melhora agressiva de performance no Android
           />
           
         )}

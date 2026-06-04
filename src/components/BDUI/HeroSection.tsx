@@ -93,6 +93,7 @@ const HeroSection = ({ title, data }:any) => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         removeClippedSubviews={true} // Evita carregar imagens de cards muito distantes à direita
+        drawDistance={1500}
       />
     </View>
   );

@@ -365,56 +365,6 @@ export default function AnimeScreen() {
   // RENDERIZAÇÃO
   // ==========================================
 
-  // Tudo o que ficava antes do map() agora é o Header da nossa FlashList
-  const renderHeader = () => (
-    <>
-      <View style={styles.headerContainer}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.animeTitle} numberOfLines={2}>{anime.nome}</Text>
-          
-          <View style={styles.metadataRow}>
-            <Text style={styles.metaNota}>★ {anime.nota}<Text style={styles.metaNotaType}>MAL</Text></Text>
-            <Text style={styles.metaNota}>★ {anime.nota_tmdb}<Text style={styles.metaNotaType}>TMBD</Text></Text>
-            <Text style={styles.metaText}>{anime.ano}</Text>
-            <Text style={styles.metaText}>{temporadas.length} Temporada(s)</Text>
-          </View>
-
-          <Text style={styles.animeDescription} ellipsizeMode="tail" numberOfLines={4}>
-            {anime.descricao}
-          </Text>
-          <Text style={styles.genresText}>{anime.generos?.join(' • ')}</Text>
-
-          {/* BOTÃO ASSISTIR DINÂMICO AQUI (MANTÉM O SEU CÓDIGO ORIGINAL) */}
-          {proximoEpisodio && (
-             <Pressable>... Seu Botão Assistir ...</Pressable> 
-          )}
-        </View>
-
-        <View style={styles.headerRight}>
-            <Image source={{ uri: anime.imagem }} style={styles.animePoster} resizeMode="cover" />
-        </View>
-      </View>
-
-      <View style={[styles.contentSection, { paddingBottom: 15 }]}>
-        <View style={styles.seasonsContainer}>
-          <Text style={styles.sectionTitle}>Episódios</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonsListContent}>
-            {temporadas.map((item, index) => (
-              <SeasonItem
-                key={item.id}
-                item={item}
-                index={index}
-                isSelected={selectedTemporadaId === item.id}
-                onSelectSeason={handleSelectTemporada}
-                setFocusedIndex={setSeasonFocusedIndex}
-              />
-            ))}
-          </ScrollView>
-        </View>
-      </View>
-    </>
-  );
-
   return (
     <View style={styles.container}>
       <Image source={{ uri: anime.banner }} style={StyleSheet.absoluteFill} resizeMode="cover" />

@@ -1,9 +1,9 @@
 // components/BDUI/LandscapeSection.tsx
 import React from 'react';
-import { FlatList, StyleSheet, Text, View, Pressable, Platform } from 'react-native';
+import { StyleSheet, Text, View, Pressable, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { FlashList } from '@shopify/flash-list'; // 1. Importar FlashList
-import { Image } from 'expo-image'; // 2. Importar o motor de imagem otimizado
+import { FlashList } from '@shopify/flash-list'; // Motor de lista de alta performance
+import { Image } from 'expo-image'; 
 
 export default function LandscapeSection({ title, data }:any) {
   const router = useRouter();
@@ -11,43 +11,43 @@ export default function LandscapeSection({ title, data }:any) {
   return (
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <FlatList
+      
+      {/* 1. Trocamos FlatList por FlashList */}
+      <FlashList
         horizontal
         data={data}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item:any) => item.id.toString()}
         showsHorizontalScrollIndicator={false}
         
-        // --- MODIFICAÇÕES AQUI ---
-        // 1. Desativa o corte agressivo da lista
-        removeClippedSubviews={false} 
-        // 2. Trocamos o marginVertical do container por paddingVertical aqui dentro
+        // 2. Tamanho estimado do card na TV (Largura 260 + Margem 16 = 276)
+        // Isso é OBRIGATÓRIO no FlashList e estabiliza o foco horizontal
+        // estimatedItemSize={276} 
+        
+        // 3. Renderiza vários cards fora da tela para o foco nunca "cair no buraco"
+        drawDistance={1500} 
+        
         contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 16 }}
-        // -------------------------
 
         renderItem={({ item }) => (
           <Pressable
-            focusable={true} // <-- ADICIONADO: Importante para o controle da TV reconhecer
+            focusable={true} 
             onPress={() => router.push(`/anime/${item.id}`)}
-            style={({ focused }) => [
+            style={({ focused, pressed }) => [
               styles.cardContainer,
-              focused && styles.cardFocused
+              (focused || pressed) && styles.cardFocused // Adicionado pressed para cliques no celular
             ]}
           >
-            {({ focused }) => (
+            {({ focused, pressed }) => (
               <View>
-                {/* <Image 
-                  source={{ uri: item.image }} 
-                  style={[styles.image, focused && styles.imageFocused]} 
-                /> */}
                 <Image 
                   source={{ uri: item.image }} 
-                   style={[styles.image, focused && styles.imageFocused]} 
+                  style={[styles.image, (focused || pressed) && styles.imageFocused]} 
                   contentFit="cover"
-                  transition={150} // Suaviza a aparição da imagem quando terminar o download
-                  cachePolicy="disk" // Força salvar as capas dos animes no armazenamento da TV
+                  transition={0} // Zera a transição (fade) para evitar o "piscar" ao rolar rápido
+                  cachePolicy="disk" 
                 />
                 <Text 
-                  style={[styles.animeTitle, focused && styles.titleFocused]}
+                  style={[styles.animeTitle, (focused || pressed) && styles.titleFocused]}
                   numberOfLines={1}
                 >
                   {item.title}
@@ -62,7 +62,6 @@ export default function LandscapeSection({ title, data }:any) {
 }
 
 const styles = StyleSheet.create({
-  // REMOVIDO: marginVertical: 16 (passou a ser paddingVertical na FlatList)
   container: { }, 
   sectionTitle: { 
     fontSize: 14, 
@@ -72,13 +71,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold' 
   },
   cardContainer: {
+    // Mantemos a largura fixa para a TV
     width: Platform.OS === 'android' && Platform.isTV ? 260 : 200,
     marginRight: 16,
     borderRadius: 8,
   },
   cardFocused: {
-    transform: [{ scale: 1.05 }], // Como o scale aqui é maior (1.05), o padding é ainda mais essencial
-    zIndex: 1, // <-- ADICIONADO: Garante que o card ampliado não fique por baixo dos itens vizinhos
+    transform: [{ scale: 1.05 }], 
+    zIndex: 1, 
   },
   image: {
     width: '100%',
