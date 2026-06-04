@@ -386,7 +386,35 @@ export default function AnimeScreen() {
 
           {/* BOTÃO ASSISTIR DINÂMICO AQUI (MANTÉM O SEU CÓDIGO ORIGINAL) */}
           {proximoEpisodio && (
-             <Pressable>... Seu Botão Assistir ...</Pressable> 
+            <Pressable
+              hasTVPreferredFocus={true} 
+              focusable={mainEpisodeHasLink} 
+              disabled={!mainEpisodeHasLink} 
+              onPress={() => vlcPress(proximoEpisodio)}
+              // ADICIONADO: "pressed" para reagir ao toque no celular
+              style={({ focused, pressed }) => [
+                styles.btnAssistirDinamico,
+                (focused || pressed) && styles.btnAssistirDinamicoFocused,
+                !mainEpisodeHasLink && styles.btnAssistirDinamicoDisabled 
+              ]}
+            >
+              {({ focused, pressed }) => (
+                <>
+                  <Image source={{ uri: proximoEpisodio.imagem }} style={styles.btnAssistirImg} resizeMode="cover" />
+                  <View style={styles.btnAssistirContent}>
+                    <Text style={[styles.btnAssistirLabel, (focused || pressed) && { color: COLORS.textRef }]}>
+                      {getWatchButtonText()}
+                    </Text>
+                    <Text style={[styles.btnAssistirEpNome, (focused || pressed) && { color: COLORS.primary }]} numberOfLines={1}>
+                      {temporadaProximoEp?.numero === 'Digital' ? 'Digital' : `T${temporadaProximoEp?.numero}`} : E{proximoEpisodio.numero} - {proximoEpisodio.nome}
+                    </Text>
+                  </View>
+                  <View style={[styles.btnAssistirPlay, (focused || pressed) && styles.btnAssistirPlayFocused]}>
+                    <Text style={styles.btnAssistirPlayIcon}>▶</Text>
+                  </View>
+                </>
+              )}
+            </Pressable>
           )}
         </View>
 
@@ -492,16 +520,16 @@ export default function AnimeScreen() {
             <Text style={styles.modalSubtitle}>"{episodioEmExecucao?.nome}"</Text>
             <View style={styles.modalButtonContainer}>
               <Pressable 
-                style={({ focused, pressed }) => [styles.modalButton, (focused || pressed) && styles.modalButtonFocused]} 
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.modalButtonText}>Cancelar</Text>
-              </Pressable>
-              <Pressable 
                 style={({ focused, pressed }) => [styles.modalButton, styles.modalButtonConfirm, (focused || pressed) && styles.modalButtonFocused]} 
                 onPress={marcarComoAssistido}
               >
                 <Text style={styles.modalButtonText}>Sim, marcar</Text>
+              </Pressable>
+              <Pressable 
+                style={({ focused, pressed }) => [styles.modalButton, (focused || pressed) && styles.modalButtonFocused]} 
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Cancelar</Text>
               </Pressable>
             </View>
           </View>
