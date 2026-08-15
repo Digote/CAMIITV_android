@@ -52,6 +52,7 @@ export default function Home() {
     { icon: 'home', label: 'Início', route: '/' },
     { icon: 'home', label: 'Temporadas', route: '/seasons' },
     { icon: 'home', label: 'AN', route: '/an' },
+    { icon: 'home', label: 'BR', route: '/br' },
     { icon: 'user', label: 'Perfil', route: '/perfil' },
   ];
 
