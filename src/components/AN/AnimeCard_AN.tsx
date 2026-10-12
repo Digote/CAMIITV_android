@@ -8,6 +8,18 @@ interface Props {
   anime: Anime;
 }
 
+function formatDateBR(isoString: string) {
+  if (!isoString) return '';
+
+  // 1. Pega apenas a parte antes do 'T' ("2026-01-17")
+  const [datePart] = isoString.split('T');
+
+  // 2. Separa ano, mês e dia
+  const [year, month, day] = datePart.split('-');
+
+  // Retorna "17/01/2026"
+  return `${day}/${month}/${year}`;
+}
 
 export default function AnimeCard({ anime }: Props) {
   const router = useRouter();
@@ -54,6 +66,15 @@ export default function AnimeCard({ anime }: Props) {
             numberOfLines={3}
           >
             {anime.title}
+          </Text>
+          <Text
+            style={[
+              styles.title,
+              focused && styles.titleFocused
+            ]}
+            numberOfLines={3}
+          >
+            {formatDateBR(anime.date)}
           </Text>
         </>
       )}

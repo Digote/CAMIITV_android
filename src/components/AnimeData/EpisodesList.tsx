@@ -8,7 +8,7 @@ export default function EpisodesList({ episodes, styles, theme }) {
       const url = `vlc://${item.links[0]}?title=${encodeURIComponent(item.title)}`;
       Linking.openURL(url);
     } else {
-      console.log(item);
+      // console.log(item);
     }
   };
   return (

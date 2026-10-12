@@ -29,7 +29,7 @@ export default function SeasonsScreen() {
     api.get("/temporadas/lista")
       .then((response) => {
         // O Laravel já manda o array prontinho na ordem certa
-        console.log(response.data)
+        // console.log(response.data)
         // console.log("#####rr")
         // setLayout(response.data);
         // setLoading(false);

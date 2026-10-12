@@ -21,8 +21,8 @@ export default function Home() {
     api.get("/home-layout")
       .then((response) => {
         // O Laravel já manda o array prontinho na ordem certa
-        console.log(response.data)
-        console.log("#####rr")
+        // console.log(response.data)
+        // console.log("#####rr")
         setLayout(response.data);
         setLoading(false);
       })
