@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Platform,
   Pressable,
   SafeAreaView,
@@ -10,6 +9,9 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import Header from '../components/Header';
 import SideMenuLayout, { MenuItem } from '../components/SideMenuLayout';
 import { useTheme } from '../theme/ThemeContext';
@@ -36,9 +38,10 @@ function formatDateBR(isoString: string) {
   return `${day}/${month}/${year}`;
 }
 
-// Componente do Card de Anime unificado
+// Componente do Card de Anime modernizado para TV
 function AnimeCard_AN({ anime }: { anime: AnimeItem }) {
   const router = useRouter();
+  const formattedDate = formatDateBR(anime.date);
 
   return (
     <Pressable
@@ -47,29 +50,65 @@ function AnimeCard_AN({ anime }: { anime: AnimeItem }) {
         styles.card,
         (focused || pressed) && styles.cardFocused,
       ]}
-      android_ripple={{ color: 'rgba(255, 255, 255, 0.22)' }}
+      android_ripple={{ color: 'rgba(51, 153, 255, 0.25)' }}
       focusable={true}
     >
-      {({ focused }) => (
-        <>
-          <Image
-            source={{ uri: anime.thumbnail }}
-            style={[styles.image, focused && styles.imageFocused]}
-          />
-          <Text
-            style={[styles.cardTitle, focused && styles.cardTitleFocused]}
-            numberOfLines={3}
-          >
-            {anime.title}
-          </Text>
-          <Text
-            style={[styles.cardTitle, focused && styles.cardTitleFocused]}
-            numberOfLines={1}
-          >
-            {formatDateBR(anime.date)}
-          </Text>
-        </>
-      )}
+      {({ focused, pressed }) => {
+        const isActive = focused || pressed;
+        return (
+          <View style={styles.cardInner}>
+            <View style={[styles.posterWrapper, isActive && styles.posterWrapperFocused]}>
+              <Image
+                source={{ uri: anime.thumbnail }}
+                style={styles.image}
+                contentFit="cover"
+                transition={150}
+                cachePolicy="disk"
+              />
+
+              <LinearGradient
+                colors={['transparent', 'rgba(11, 11, 12, 0.4)', 'rgba(11, 11, 12, 0.95)']}
+                style={styles.posterGradient}
+              />
+
+              {/* Badge de data no topo direito */}
+              {!!formattedDate && (
+                <View style={[styles.dateBadge, isActive && styles.dateBadgeFocused]}>
+                  <Ionicons name="calendar-outline" size={10} color="#FFF" />
+                  <Text style={styles.dateBadgeText}>{formattedDate}</Text>
+                </View>
+              )}
+
+              {/* Indicador de Play ao focar com o controle da TV */}
+              {isActive && (
+                <View style={styles.playOverlay}>
+                  <View style={styles.playButtonCircle}>
+                    <Ionicons name="play" size={22} color="#FFF" style={{ marginLeft: 2 }} />
+                  </View>
+                </View>
+              )}
+
+              {/* Episódio ou tag na base do poster */}
+              {!!anime.episodio_nome && (
+                <View style={styles.episodeChip}>
+                  <Text style={styles.episodeChipText} numberOfLines={1}>
+                    {anime.episodio_nome}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.infoContainer}>
+              <Text
+                style={[styles.cardTitle, isActive && styles.cardTitleFocused]}
+                numberOfLines={2}
+              >
+                {anime.title}
+              </Text>
+            </View>
+          </View>
+        );
+      }}
     </Pressable>
   );
 }
@@ -82,7 +121,6 @@ export default function Home() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const fetchAnimes = async (pageNumber: number) => {
-    // Evita requisições extras se já chegou na última página
     if (pageNumber > 1 && pageNumber > lastPage) return;
 
     if (pageNumber === 1) {
@@ -92,9 +130,7 @@ export default function Home() {
     }
 
     try {
-      const response = await api.get(
-        `/an/animes?page=${pageNumber}`
-      );
+      const response = await api.get(`/an/animes?page=${pageNumber}`);
 
       const data = response.data.data;
       const totalPages = response.data.last_page;
@@ -110,7 +146,6 @@ export default function Home() {
           }))
         : [];
 
-      // Concatena as novas páginas no estado existente
       setAnimes((prev) => (pageNumber === 1 ? mapped : [...prev, ...mapped]));
       setLastPage(totalPages);
     } catch (error) {
@@ -137,82 +172,275 @@ export default function Home() {
     { icon: 'home', label: 'Início', route: '/' },
     { icon: 'home', label: 'Temporadas', route: '/seasons' },
     { icon: 'home', label: 'AN', route: '/an' },
+    { icon: 'home', label: 'BR', route: '/br' },
     { icon: 'user', label: 'Perfil', route: '/perfil' },
   ];
 
   const { theme } = useTheme();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#000001', flexDirection: 'row' }}>
+    <SafeAreaView style={styles.screen}>
       <SideMenuLayout menuItems={menuItems}>
         <Header />
 
-        <FlatList
-          numColumns={5}
-          data={animes}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <AnimeCard_AN anime={item} />}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
-          ListHeaderComponent={
-            <Text style={[styles.headerTitle, { color: '#FFF', fontFamily: theme.fonts.heading }]}>
-              Lançamentos
-            </Text>
-          }
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.4}
-          ListFooterComponent={
-            loadingMore ? (
-              <View style={styles.footerLoader}>
-                <ActivityIndicator size="large" color="#FFF" />
+        {loading ? (
+          <View style={styles.centerLoader}>
+            <ActivityIndicator size="large" color="#3399FF" />
+            <Text style={styles.loaderText}>Carregando catálogo AN...</Text>
+          </View>
+        ) : (
+          <FlatList
+            numColumns={5}
+            data={animes}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => <AnimeCard_AN anime={item} />}
+            contentContainerStyle={styles.listContent}
+            columnWrapperStyle={styles.columnWrapper}
+            showsVerticalScrollIndicator={false}
+            ListHeaderComponent={
+              <View style={styles.headerBanner}>
+                <View style={styles.headerTitleRow}>
+                  <View style={styles.accentBar} />
+                  <View>
+                    <Text
+                      style={[
+                        styles.headerTitle,
+                        { fontFamily: theme.fonts.heading },
+                      ]}
+                    >
+                      Catálogo AN • Lançamentos
+                    </Text>
+                    <Text style={styles.headerSubtitle}>
+                      Explore os últimos animes adicionados ({animes.length} títulos carregados)
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.liveBadge}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.liveBadgeText}>ATUALIZADO</Text>
+                </View>
               </View>
-            ) : null
-          }
-        />
+            }
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.4}
+            ListFooterComponent={
+              loadingMore ? (
+                <View style={styles.footerLoader}>
+                  <ActivityIndicator size="large" color="#3399FF" />
+                  <Text style={styles.footerLoaderText}>Carregando mais animes...</Text>
+                </View>
+              ) : null
+            }
+          />
+        )}
       </SideMenuLayout>
     </SafeAreaView>
   );
 }
 
+const isTV = Platform.OS === 'android' && Platform.isTV;
+
 const styles = StyleSheet.create({
-  headerTitle: {
-    fontSize: 18,
-    marginLeft: 16,
-    fontWeight: 'bold',
-    marginVertical: 16,
+  screen: {
+    flex: 1,
+    backgroundColor: '#0B0B0C',
+    flexDirection: 'row',
   },
-  footerLoader: {
-    marginVertical: 20,
+  centerLoader: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
   },
+  loaderText: {
+    color: '#9CA3AF',
+    marginTop: 12,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  listContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 48,
+  },
+  columnWrapper: {
+    gap: 10,
+    marginBottom: 18,
+  },
+  headerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 22,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    backgroundColor: '#14161D',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  accentBar: {
+    width: 4,
+    height: 36,
+    borderRadius: 4,
+    backgroundColor: '#3399FF',
+    marginRight: 14,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 2,
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(51, 153, 255, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(51, 153, 255, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    gap: 6,
+  },
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#3399FF',
+  },
+  liveBadgeText: {
+    color: '#3399FF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
   card: {
-    width: Platform.OS === 'android' && Platform.isTV ? 160 : 160,
-    marginRight: Platform.OS === 'android' && Platform.isTV ? 12 : 8,
-    borderRadius: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    padding: 4,
+    width: isTV ? 154 : 150,
+    borderRadius: 12,
   },
   cardFocused: {
-    borderColor: '#FFF',
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    transform: [{ scale: 1.01 }],
+    transform: [{ scale: 1.05 }],
+    zIndex: 10,
+  },
+  cardInner: {
+    width: '100%',
+  },
+  posterWrapper: {
+    width: '100%',
+    height: isTV ? 230 : 224,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#181A20',
+    borderWidth: 2.5,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    position: 'relative',
+  },
+  posterWrapperFocused: {
+    borderColor: '#3399FF',
+    shadowColor: '#3399FF',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 10,
   },
   image: {
     width: '100%',
-    height: Platform.OS === 'android' && Platform.isTV ? 260 : 260,
-    borderRadius: 0,
+    height: '100%',
   },
-  imageFocused: {
-    borderColor: '#FFF',
+  posterGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '55%',
+  },
+  dateBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+     gap: 4,
+    backgroundColor: 'rgba(11, 11, 12, 0.78)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  dateBadgeFocused: {
+    backgroundColor: '#3399FF',
+    borderColor: '#66B2FF',
+  },
+  dateBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(11, 11, 12, 0.28)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButtonCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(51, 153, 255, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  episodeChip: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    right: 8,
+    backgroundColor: 'rgba(20, 22, 29, 0.85)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  episodeChipText: {
+    color: '#D1D5DB',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  infoContainer: {
+    paddingTop: 8,
+    paddingHorizontal: 4,
   },
   cardTitle: {
-    marginTop: 8,
-    fontWeight: 'bold',
-    fontSize: Platform.OS === 'android' && Platform.isTV ? 12 : 12,
-    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#9CA3AF',
     textAlign: 'center',
   },
   cardTitleFocused: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+  footerLoader: {
+    marginVertical: 24,
+    alignItems: 'center',
+    gap: 8,
+  },
+  footerLoaderText: {
+    color: '#9CA3AF',
+    fontSize: 12,
   },
 });

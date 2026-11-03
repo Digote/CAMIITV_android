@@ -8,6 +8,10 @@ criar apk
 npx eas build --profile preview_tv --platform android
 
 
+update
+npx eas update --channel preview --message "sua mensagem de atualização"
+
+
 rodar
 npx expo start
 
