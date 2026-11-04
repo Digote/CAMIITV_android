@@ -53,6 +53,7 @@ export default function Home() {
     { icon: 'home', label: 'Temporadas', route: '/seasons' },
     { icon: 'home', label: 'AN', route: '/an' },
     { icon: 'home', label: 'BR', route: '/br' },
+    { icon: 'magnet', label: 'NYAA', route: '/nyaa' },
     { icon: 'user', label: 'Perfil', route: '/perfil' },
   ];
 

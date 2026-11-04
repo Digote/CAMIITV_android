@@ -11,7 +11,10 @@ export default function HomeScreen() {
 
   const menuItems: MenuItem[] = [
     { icon: 'home', label: 'Início', route: '/' },
+    { icon: 'home', label: 'Temporadas', route: '/seasons' },
     { icon: 'home', label: 'AN', route: '/an' },
+    { icon: 'home', label: 'BR', route: '/br' },
+    { icon: 'magnet', label: 'NYAA', route: '/nyaa' },
     { icon: 'user', label: 'Perfil', route: '/perfil' },
   ];
 
