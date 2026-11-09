@@ -1,0 +1,7 @@
+{
+  "name": "camii-vlc-player",
+  "version": "1.0.0",
+  "description": "Native LibVLC video player module for CAMII TV with MKV and ASS/SSA subtitle support",
+  "main": "index.ts",
+  "types": "index.ts"
+}

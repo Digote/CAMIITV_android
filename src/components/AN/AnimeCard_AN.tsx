@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text } from 'react-native';
 import { Anime } from '../../types';
-import SendIntentAndroid from 'react-native-send-intent';
+import { launchVideoPlayback } from '@/utils/playerSettings';
 
 interface Props {
   anime: Anime;
@@ -10,41 +10,32 @@ interface Props {
 
 function formatDateBR(isoString: string) {
   if (!isoString) return '';
-
-  // 1. Pega apenas a parte antes do 'T' ("2026-01-17")
   const [datePart] = isoString.split('T');
-
-  // 2. Separa ano, mês e dia
   const [year, month, day] = datePart.split('-');
-
-  // Retorna "17/01/2026"
   return `${day}/${month}/${year}`;
 }
 
 export default function AnimeCard({ anime }: Props) {
   const router = useRouter();
 
-  const vlcPress = async (ep:any) => {
-    
-    const title = ep.nome
+  const vlcPress = async (ep: any) => {
+    const title = ep.nome || ep.title || 'Episódio';
     const url = ep.link;
+    if (!url) return;
 
-    SendIntentAndroid.openAppWithData("org.videolan.vlc",
+    await launchVideoPlayback(router, {
       url,
-      "video/*", {
-        title: title,
-      } 
-    );
-
+      title,
+      poster: ep.thumbnail,
+    });
   };
-
 
   return (
     <Pressable
-      onPress={() =>  vlcPress(anime)}
+      onPress={() => vlcPress(anime)}
       style={({ focused, pressed }) => [
         styles.card,
-        (focused || pressed) && styles.cardFocused
+        (focused || pressed) && styles.cardFocused,
       ]}
       android_ripple={{ color: 'rgba(255, 255, 255, 0.22)' }}
       focusable={true}
@@ -53,25 +44,16 @@ export default function AnimeCard({ anime }: Props) {
         <>
           <Image
             source={{ uri: anime.thumbnail }}
-            style={[
-              styles.image,
-              focused && styles.imageFocused
-            ]}
+            style={[styles.image, focused && styles.imageFocused]}
           />
           <Text
-            style={[
-              styles.title,
-              focused && styles.titleFocused
-            ]}
+            style={[styles.title, focused && styles.titleFocused]}
             numberOfLines={3}
           >
             {anime.title}
           </Text>
           <Text
-            style={[
-              styles.title,
-              focused && styles.titleFocused
-            ]}
+            style={[styles.title, focused && styles.titleFocused]}
             numberOfLines={3}
           >
             {formatDateBR(anime.date)}
@@ -91,7 +73,6 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   cardFocused: {
-    // borderWidth: 2,
     borderColor: '#FFF',
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
     transform: [{ scale: 1.01 }],
@@ -102,7 +83,6 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   imageFocused: {
-    // borderWidth: 1,
     borderColor: '#FFF',
   },
   title: {

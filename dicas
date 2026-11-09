@@ -1,14 +1,14 @@
 eas build --profile development --platform android
 
-apk de desenvolvimento  (quando intalar nova dependencia tem de criar um novo)
+apk de desenvolvimento  (quando intalar nova dependencia ou modulo nativo tem de criar um novo)
 npx eas build --profile development_tv --platform android
 
 
-criar apk
+criar apk (Produção / Preview TV - Recomendado para instalar na TV com o Player Interno LibVLC)
 npx eas build --profile preview_tv --platform android
 
 
-update
+update (para atualizar mudanças apenas de JS/Telas depois que o novo APK já estiver instalado)
 npx eas update --channel preview --message "sua mensagem de atualização" --environment production
 
 

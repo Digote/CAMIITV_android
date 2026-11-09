@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View, StyleProp, ViewStyle, Text, Image } from 'react-native';
+import { Animated, Pressable, StyleSheet, View, StyleProp, ViewStyle, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome5 } from '@expo/vector-icons';
 import logo from '../assets/logo.png';
@@ -21,9 +21,18 @@ export default function SideMenuLayout({ children, menuItems, style }: SideMenuL
   const slideAnim = useRef(new Animated.Value(60)).current;
   const router = useRouter();
 
+  const resolvedMenuItems = React.useMemo(() => {
+    const hasConfig = menuItems.some((item) => item.route === '/configuracoes');
+    if (hasConfig) return menuItems;
+    return [
+      ...menuItems,
+      { icon: 'cog', label: 'Configurações', route: '/configuracoes' },
+    ];
+  }, [menuItems]);
+
   // expand on first focus, collapse when no focus
   const expandMenu = () => {
-    setFocusedCount(prev => {
+    setFocusedCount((prev) => {
       if (prev === 0) {
         Animated.timing(slideAnim, {
           toValue: 250,
@@ -36,7 +45,7 @@ export default function SideMenuLayout({ children, menuItems, style }: SideMenuL
   };
 
   const collapseMenu = () => {
-    setFocusedCount(prev => {
+    setFocusedCount((prev) => {
       const next = prev - 1;
       if (next <= 0) {
         Animated.timing(slideAnim, {
@@ -51,8 +60,8 @@ export default function SideMenuLayout({ children, menuItems, style }: SideMenuL
   };
 
   return (
-    <View style={[styles.container, style]}>      
-      <Animated.View style={[styles.sideMenu, { width: slideAnim }]}>        
+    <View style={[styles.container, style]}>
+      <Animated.View style={[styles.sideMenu, { width: slideAnim }]}>
         <Animated.Image
           source={logo}
           resizeMode="contain"
@@ -64,12 +73,12 @@ export default function SideMenuLayout({ children, menuItems, style }: SideMenuL
             },
           ]}
         />
-        {menuItems.map((item, index) => (
+        {resolvedMenuItems.map((item, index) => (
           <Pressable
             key={item.route}
             onFocus={expandMenu}
             onBlur={collapseMenu}
-            onPress={() => router.push(item.route)}
+            onPress={() => router.push(item.route as any)}
             hasTVPreferredFocus={index === 0}
             style={({ focused }) => [styles.menuItem, focused && styles.menuItemFocused]}
           >
@@ -89,9 +98,7 @@ export default function SideMenuLayout({ children, menuItems, style }: SideMenuL
           </Pressable>
         ))}
       </Animated.View>
-      <View style={styles.content}>
-        {children}
-      </View>
+      <View style={styles.content}>{children}</View>
     </View>
   );
 }

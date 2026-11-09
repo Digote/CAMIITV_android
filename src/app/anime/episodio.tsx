@@ -14,8 +14,6 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import SendIntentAndroid from 'react-native-send-intent';
-import axios from 'axios';
 import api from '@/services/api';
 import {
   EpisodePagePayload,
@@ -23,6 +21,10 @@ import {
   NyaaOption,
   normalizeImageUrl,
 } from '@/utils/episodeStore';
+import {
+  launchVideoPlayback,
+  usePlayerSettings,
+} from '@/utils/playerSettings';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -37,12 +39,14 @@ const NETFLIX = {
   matchGreen: '#46D369',
   digitalBlue: '#12bbf3',
   nyaaPurple: '#A855F7',
+  vlcOrange: '#FF8800',
   border: 'rgba(255, 255, 255, 0.18)',
 };
 
 export default function EpisodioNetflixScreen() {
   const router = useRouter();
   const appState = useRef(AppState.currentState);
+  const { settings, updateSettings } = usePlayerSettings();
 
   const [payload, setPayload] = useState<EpisodePagePayload | null>(() =>
     getCurrentEpisodePayload()
@@ -66,7 +70,7 @@ export default function EpisodioNetflixScreen() {
     setIsWatched(current.episode?.assistido?.completo === 1);
   }, [router]);
 
-  // Monitora o retorno do VLC para perguntar se deseja marcar como assistido
+  // Monitora o retorno do VLC externo para perguntar se deseja marcar como assistido
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (
@@ -102,6 +106,11 @@ export default function EpisodioNetflixScreen() {
   const digitalLinks = episode.digitalLinks || [];
   const nyaaOptions = episode.nyaaOptions || episode.opcoes || [];
 
+  const isInternalPlayer = settings.playerType === 'internal';
+  const playerSubLabel = isInternalPlayer
+    ? 'Reproduzir no Player Interno'
+    : 'Reproduzir no VLC Externo';
+
   const marcarAssistido = async () => {
     if (!episode.id || episode.isNyaaOnly) return;
     try {
@@ -118,33 +127,31 @@ export default function EpisodioNetflixScreen() {
   const playDirectLink = async (url: string, label?: string) => {
     if (!url) return;
 
-    if (!episode.isNyaaOnly) {
-      esperandoRetornoRef.current = true;
-      tempoInicioVlcRef.current = Date.now();
-    }
-
     const title = episode.numero
       ? `E${episode.numero} - ${episode.nome}${label ? ` [${label}]` : ''}`
       : `${episode.nome}${label ? ` [${label}]` : ''}`;
 
     try {
-      if (url.toLowerCase().startsWith('magnet')) {
-        const result = await axios.post('https://tx.camii.com.br/create', {
-          magnet: url,
-        });
-        SendIntentAndroid.openAppWithData(
-          'org.videolan.vlc',
-          `https://tx.camii.com.br${result.data.streamUrl}`,
-          'video/*',
-          { title }
-        );
-      } else {
-        SendIntentAndroid.openAppWithData('org.videolan.vlc', url, 'video/*', {
-          title,
-        });
+      if (settings.playerType === 'external_vlc' && !episode.isNyaaOnly) {
+        esperandoRetornoRef.current = true;
+        tempoInicioVlcRef.current = Date.now();
       }
+
+      await launchVideoPlayback(router, {
+        url,
+        title,
+        animeName: anime.nome,
+        poster: episode.imagem || anime.banner || anime.imagem,
+        episodeId: episode.id,
+        isNyaaOnly: episode.isNyaaOnly,
+        onShouldPromptWatched: () => {
+          if (!episode.isNyaaOnly) {
+            setModalVisible(true);
+          }
+        },
+      });
     } catch (error) {
-      console.error('Erro ao abrir VLC:', error);
+      console.error('Erro ao iniciar reprodução:', error);
       esperandoRetornoRef.current = false;
     }
   };
@@ -168,7 +175,7 @@ export default function EpisodioNetflixScreen() {
         return;
       }
 
-      if (!episode.isNyaaOnly) {
+      if (settings.playerType === 'external_vlc' && !episode.isNyaaOnly) {
         esperandoRetornoRef.current = true;
         tempoInicioVlcRef.current = Date.now();
       }
@@ -177,12 +184,19 @@ export default function EpisodioNetflixScreen() {
         ? `E${episode.numero} - ${episode.nome} [Nyaa ${opcao.resolution}]`
         : `${episode.nome} [${opcao.resolution}]`;
 
-      SendIntentAndroid.openAppWithData(
-        'org.videolan.vlc',
-        streamUrl,
-        'video/*',
-        { title }
-      );
+      await launchVideoPlayback(router, {
+        url: streamUrl,
+        title,
+        animeName: anime.nome,
+        poster: episode.imagem || anime.banner || anime.imagem,
+        episodeId: episode.id,
+        isNyaaOnly: episode.isNyaaOnly,
+        onShouldPromptWatched: () => {
+          if (!episode.isNyaaOnly) {
+            setModalVisible(true);
+          }
+        },
+      });
     } catch (error) {
       console.error('Erro ao obter stream do Webtor:', error);
       Alert.alert('Erro', 'Falha ao gerar o link de reprodução no Webtor.');
@@ -202,6 +216,12 @@ export default function EpisodioNetflixScreen() {
     }
   };
 
+  const togglePlayerModeQuick = () => {
+    updateSettings({
+      playerType: isInternalPlayer ? 'external_vlc' : 'internal',
+    });
+  };
+
   const hasAnySource =
     normalLinks.length > 0 || digitalLinks.length > 0 || nyaaOptions.length > 0;
 
@@ -212,7 +232,12 @@ export default function EpisodioNetflixScreen() {
       <View style={styles.container}>
         {/* Artwork de Fundo em Tela Cheia estilo Netflix */}
         <ExpoImage
-          source={{ uri: normalizeImageUrl(episode.imagem || anime.banner || anime.imagem, anime.imagem) }}
+          source={{
+            uri: normalizeImageUrl(
+              episode.imagem || anime.banner || anime.imagem,
+              anime.imagem
+            ),
+          }}
           style={styles.backdropImage}
           contentFit="cover"
           transition={250}
@@ -247,18 +272,50 @@ export default function EpisodioNetflixScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Topo: Botão Voltar + Branding */}
+          {/* Topo: Botão Voltar + Seletor Rápido do Player + Branding */}
           <View style={styles.topBar}>
-            <Pressable
-              focusable={true}
-              onPress={() => router.back()}
-              style={({ focused, pressed }) => [
-                styles.backBtn,
-                (focused || pressed) && styles.backBtnFocused,
-              ]}
-            >
-              <Text style={styles.backBtnText}>← Voltar</Text>
-            </Pressable>
+            <View style={styles.topLeftGroup}>
+              <Pressable
+                focusable={true}
+                onPress={() => router.back()}
+                style={({ focused, pressed }) => [
+                  styles.backBtn,
+                  (focused || pressed) && styles.backBtnFocused,
+                ]}
+              >
+                <Text style={styles.backBtnText}>← Voltar</Text>
+              </Pressable>
+
+              <Pressable
+                focusable={true}
+                onPress={togglePlayerModeQuick}
+                onLongPress={() => router.push('/configuracoes' as any)}
+                style={({ focused, pressed }) => [
+                  styles.playerModeBtn,
+                  isInternalPlayer
+                    ? styles.playerModeBtnInternal
+                    : styles.playerModeBtnExternal,
+                  (focused || pressed) && styles.backBtnFocused,
+                ]}
+              >
+                <Text style={styles.playerModeBtnText}>
+                  {isInternalPlayer
+                    ? '🎬 Player: Interno (LibVLC)'
+                    : '🟠 Player: VLC Externo'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                focusable={true}
+                onPress={() => router.push('/configuracoes' as any)}
+                style={({ focused, pressed }) => [
+                  styles.backBtn,
+                  (focused || pressed) && styles.backBtnFocused,
+                ]}
+              >
+                <Text style={styles.backBtnText}>⚙ Configurar Player</Text>
+              </Pressable>
+            </View>
 
             <View style={styles.seriesBadgeRow}>
               <View style={styles.netflixBar} />
@@ -319,7 +376,7 @@ export default function EpisodioNetflixScreen() {
                   <Text
                     style={[styles.hdPillText, { color: NETFLIX.nyaaPurple }]}
                   >
-                    NYAA HD
+                    NYAA HD • MKV/ASS
                   </Text>
                 </View>
               )}
@@ -355,7 +412,11 @@ export default function EpisodioNetflixScreen() {
                   ) : (
                     <Text style={styles.netflixPlayIcon}>▶</Text>
                   )}
-                  <Text style={styles.netflixPlayText}>Assistir Agora</Text>
+                  <Text style={styles.netflixPlayText}>
+                    {isInternalPlayer
+                      ? 'Assistir Agora (Interno)'
+                      : 'Assistir no VLC Externo'}
+                  </Text>
                 </Pressable>
               )}
 
@@ -411,7 +472,7 @@ export default function EpisodioNetflixScreen() {
                           Opção {idx + 1}
                         </Text>
                         <Text style={styles.sourceCardSub}>
-                          Reproduzir no VLC
+                          {playerSubLabel}
                         </Text>
                       </View>
                       <Text style={styles.sourceCardPlay}>▶</Text>
@@ -456,7 +517,7 @@ export default function EpisodioNetflixScreen() {
                           {digitalLinks.length > 1 ? `#${idx + 1}` : 'HD'}
                         </Text>
                         <Text style={styles.sourceCardSub}>
-                          Servidor Alternativo
+                          {playerSubLabel}
                         </Text>
                       </View>
                       <Text style={styles.sourceCardPlay}>▶</Text>
@@ -470,7 +531,7 @@ export default function EpisodioNetflixScreen() {
             {nyaaOptions.length > 0 && (
               <View style={styles.sourceSection}>
                 <Text style={styles.sourceSectionTitle}>
-                  Nyaa • Qualidades de Vídeo
+                  Nyaa • Qualidades de Vídeo (MKV + Legendas ASS)
                 </Text>
                 <View style={styles.cardsRow}>
                   {nyaaOptions.map((opcao) => {
@@ -516,9 +577,9 @@ export default function EpisodioNetflixScreen() {
                               : 'PADRÃO'}
                           </Text>
                           <Text style={styles.sourceCardSub}>
-                            {opcao.ptbr === 1
-                              ? 'Com Legenda PT-BR'
-                              : 'Webtor Stream'}
+                            {isInternalPlayer
+                              ? 'Player Interno (ASS)'
+                              : 'VLC Externo (Intent)'}
                           </Text>
                         </View>
                         {isThisLoading ? (
@@ -535,7 +596,7 @@ export default function EpisodioNetflixScreen() {
           </View>
         </ScrollView>
 
-        {/* Modal de confirmação após voltar do VLC */}
+        {/* Modal de confirmação após assistir */}
         <Modal
           visible={modalVisible}
           transparent
@@ -601,9 +662,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 28,
   },
+  topLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   backBtn: {
     paddingVertical: 8,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     borderRadius: 6,
     backgroundColor: 'rgba(20, 20, 20, 0.75)',
     borderWidth: 2,
@@ -616,7 +682,26 @@ const styles = StyleSheet.create({
   },
   backBtnText: {
     color: NETFLIX.white,
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  playerModeBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    borderWidth: 2,
+  },
+  playerModeBtnInternal: {
+    backgroundColor: 'rgba(255, 136, 0, 0.18)',
+    borderColor: 'rgba(255, 136, 0, 0.55)',
+  },
+  playerModeBtnExternal: {
+    backgroundColor: 'rgba(18, 187, 243, 0.18)',
+    borderColor: 'rgba(18, 187, 243, 0.55)',
+  },
+  playerModeBtnText: {
+    color: NETFLIX.white,
+    fontSize: 13,
     fontWeight: 'bold',
   },
   seriesBadgeRow: {
@@ -636,7 +721,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    maxWidth: 500,
+    maxWidth: 420,
   },
 
   heroBlock: {

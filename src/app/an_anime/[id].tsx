@@ -3,20 +3,18 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
-import SendIntentAndroid from 'react-native-send-intent';
-import axios from 'axios';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import SideMenuLayout, { MenuItem } from '../../components/SideMenuLayout';
 import { useTheme } from '../../theme/ThemeContext';
 import api from '@/services/api';
+import { launchVideoPlayback } from '@/utils/playerSettings';
 
 interface AnimeDetails {
   id: number;
@@ -47,6 +45,7 @@ function formatDateBR(isoString: string) {
 
 export default function AnimeDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const { theme } = useTheme();
 
   const [anime, setAnime] = useState<AnimeDetails | null>(null);
@@ -71,9 +70,13 @@ export default function AnimeDetailsScreen() {
       });
   }, [id]);
 
-  const playEpisode = (ep: Episodio) => {
-    SendIntentAndroid.openAppWithData('org.videolan.vlc', ep.link, 'video/*', {
+  const playEpisode = async (ep: Episodio) => {
+    await launchVideoPlayback(router, {
+      url: ep.link,
       title: ep.nome,
+      animeName: anime?.nome,
+      poster: anime?.img,
+      episodeId: String(ep.id),
     });
   };
 
@@ -96,54 +99,54 @@ export default function AnimeDetailsScreen() {
 
   return (
     <>
-        <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false }} />
 
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#000001', flexDirection: 'row' }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#000001', flexDirection: 'row' }}>
         <SideMenuLayout menuItems={menuItems}>
-            <Header />
+          <Header />
 
-            <FlatList
+          <FlatList
             data={episodios}
             keyExtractor={(item) => String(item.id)}
             contentContainerStyle={{ padding: 16 }}
             ListHeaderComponent={
-                anime ? (
+              anime ? (
                 <View style={styles.headerContainer}>
-                    <Image source={{ uri: anime.img }} style={styles.poster} />
-                    <View style={styles.infoContainer}>
+                  <Image source={{ uri: anime.img }} style={styles.poster} />
+                  <View style={styles.infoContainer}>
                     <Text style={[styles.animeTitle, { fontFamily: theme.fonts.heading }]}>
-                        {anime.nome}
+                      {anime.nome}
                     </Text>
                     <Text style={styles.animeDate}>
-                        Cadastrado em: {formatDateBR(anime.created_at)}
+                      Cadastrado em: {formatDateBR(anime.created_at)}
                     </Text>
                     <Text style={styles.episodesSectionTitle}>
-                        Episódios ({episodios.length})
+                      Episódios ({episodios.length})
                     </Text>
-                    </View>
+                  </View>
                 </View>
-                ) : null
+              ) : null
             }
             renderItem={({ item }) => (
-                <Pressable
+              <Pressable
                 onPress={() => playEpisode(item)}
                 style={({ focused, pressed }) => [
-                    styles.episodeCard,
-                    (focused || pressed) && styles.episodeCardFocused,
+                  styles.episodeCard,
+                  (focused || pressed) && styles.episodeCardFocused,
                 ]}
                 android_ripple={{ color: 'rgba(255, 255, 255, 0.22)' }}
                 focusable={true}
-                >
+              >
                 {({ focused }) => (
-                    <Text style={[styles.episodeTitle, focused && styles.episodeTitleFocused]}>
+                  <Text style={[styles.episodeTitle, focused && styles.episodeTitleFocused]}>
                     {item.nome}
-                    </Text>
+                  </Text>
                 )}
-                </Pressable>
+              </Pressable>
             )}
-            />
+          />
         </SideMenuLayout>
-        </SafeAreaView>
+      </SafeAreaView>
     </>
   );
 }

@@ -10,14 +10,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
-import SendIntentAndroid from 'react-native-send-intent';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import SideMenuLayout, { MenuItem } from '../../components/SideMenuLayout';
 import { useTheme } from '../../theme/ThemeContext';
 import api from '@/services/api';
 import { normalizeImageUrl } from '@/utils/episodeStore';
+import { launchVideoPlayback } from '@/utils/playerSettings';
 
 interface NyaaAnimeDetails {
   id: number;
@@ -56,6 +56,7 @@ function formatDateBR(isoString: string) {
 
 export default function NyaaAnimeDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const { theme } = useTheme();
 
   const [anime, setAnime] = useState<NyaaAnimeDetails | null>(null);
@@ -87,15 +88,23 @@ export default function NyaaAnimeDetailsScreen() {
     setLoadingEpisodeId(opcao.id);
     try {
       const response = await api.get(`/nyaa/episodio/${opcao.id}/stream`);
-      const streamUrl = response.data?.link || response.data?.download_url || response.data?.stream_url;
+      const streamUrl =
+        response.data?.link ||
+        response.data?.download_url ||
+        response.data?.stream_url;
 
       if (!streamUrl) {
         Alert.alert('Erro', 'Não foi possível obter o link de reprodução no Webtor.');
         return;
       }
 
-      SendIntentAndroid.openAppWithData('org.videolan.vlc', streamUrl, 'video/*', {
+      await launchVideoPlayback(router, {
+        url: streamUrl,
         title: `${epNome} [${opcao.resolution}]`,
+        animeName: anime?.nome,
+        poster: anime?.img,
+        episodeId: String(opcao.id),
+        isNyaaOnly: true,
       });
     } catch (error) {
       console.error('Erro ao obter stream do Webtor:', error);
@@ -184,7 +193,6 @@ export default function NyaaAnimeDetailsScreen() {
                     )}
                   </View>
 
-                  {/* Botões de resolução focáveis pelo controle da TV */}
                   <View style={styles.resolutionsRow}>
                     {opcoes.map((opcao) => {
                       const isThisLoading = loadingEpisodeId === opcao.id;

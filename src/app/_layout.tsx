@@ -14,8 +14,9 @@ import {
   View,
 } from 'react-native';
 import 'react-native-gesture-handler';
+import { loadPlayerSettings } from '@/utils/playerSettings';
 
-const ROOT_ROUTES = ['/', '/an', '/br', '/nyaa', '/seasons', '/perfil'];
+const ROOT_ROUTES = ['/', '/an', '/br', '/nyaa', '/seasons', '/perfil', '/configuracoes'];
 
 export default function RootLayout() {
   const router = useRouter();
@@ -45,6 +46,7 @@ export default function RootLayout() {
 
   // 1. Checa atualização ao abrir o app E toda vez que o app volta do segundo plano na TV!
   useEffect(() => {
+    loadPlayerSettings();
     checkAndApplyUpdates(false);
 
     const subscription = AppState.addEventListener('change', (nextAppState) => {
@@ -89,9 +91,11 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="perfil" options={{ headerShown: false }} />
+        <Stack.Screen name="configuracoes" options={{ headerShown: false }} />
         <Stack.Screen name="seasons" options={{ headerShown: false }} />
         <Stack.Screen name="an" options={{ headerShown: false }} />
         <Stack.Screen name="nyaa" options={{ headerShown: false }} />
+        <Stack.Screen name="player" options={{ headerShown: false }} />
 
         {/* Rotas dinâmicas */}
         <Stack.Screen name="anime/[id]" options={{ headerShown: false, title: 'Detalhes' }} />
