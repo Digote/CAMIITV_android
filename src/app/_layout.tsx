@@ -95,6 +95,7 @@ export default function RootLayout() {
 
         {/* Rotas dinâmicas */}
         <Stack.Screen name="anime/[id]" options={{ headerShown: false, title: 'Detalhes' }} />
+        <Stack.Screen name="anime/episodio" options={{ headerShown: false, title: 'Episódio' }} />
         <Stack.Screen name="an_anime/[id]" options={{ headerShown: false, title: 'Detalhes AN' }} />
         <Stack.Screen name="nyaa_anime/[id]" options={{ headerShown: false, title: 'Detalhes NYAA' }} />
       </Stack>

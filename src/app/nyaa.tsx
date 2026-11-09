@@ -17,6 +17,7 @@ import SideMenuLayout, { MenuItem } from '../components/SideMenuLayout';
 import { useTheme } from '../theme/ThemeContext';
 import { useRouter } from 'expo-router';
 import api from '@/services/api';
+import { normalizeImageUrl } from '@/utils/episodeStore';
 
 interface NyaaAnimeItem {
   id: string;
@@ -58,7 +59,7 @@ function AnimeCard_Nyaa({ anime }: { anime: NyaaAnimeItem }) {
           <View style={styles.cardInner}>
             <View style={[styles.posterWrapper, isActive && styles.posterWrapperFocused]}>
               <Image
-                source={{ uri: anime.thumbnail }}
+                source={{ uri: normalizeImageUrl(anime.thumbnail) }}
                 style={styles.image}
                 contentFit="cover"
                 transition={150}

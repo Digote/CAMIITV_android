@@ -1,192 +1,648 @@
-import api from '@/services/api';
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, Image, Pressable, Platform } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import Header from '../components/Header';
+import SideMenuLayout, { MenuItem } from '../components/SideMenuLayout';
+import { useTheme } from '../theme/ThemeContext';
+import api from '@/services/api';
+import { normalizeImageUrl } from '@/utils/episodeStore';
 
-// Dados simulados para o exemplo
-const SEASONS = [
-  { id: '1', name: 'Outono 2026' },
-  { id: '2', name: 'Inverno 2026' },
-  { id: '3', name: 'Primavera 2026' },
-  { id: '4', name: 'Verão 2026' },
-];
+interface SeasonAnimeItem {
+  id: string;
+  nome: string;
+  title: string;
+  imagem: string;
+  cover: string;
+  banner?: string;
+  nota_mal?: number | string | null;
+  nota_tmdb?: number | string | null;
+  status?: number | null;
+  temporada_ano?: number | null;
+  temporada_estacao?: number | null;
+  temporadas_count?: number;
+  nyaa_animes_count?: number;
+}
 
-const ANIMES = [
-  { id: '101', title: 'Jujutsu Kaisen', seasonId: '1', cover: 'https://myanimelist.net/images/anime/1015/151233l.jpg' },
-  { id: '102', title: 'Frieren', seasonId: '1', cover: 'https://myanimelist.net/images/anime/1015/151233l.jpg' },
-  { id: '103', title: 'Solo Leveling', seasonId: '2', cover: 'https://myanimelist.net/images/anime/1015/151233l.jpg' },
-  { id: '104', title: 'Mashle', seasonId: '2', cover: 'https://myanimelist.net/images/anime/1015/151233l.jpg' },
-  { id: '105', title: 'Kaiju No. 8', seasonId: '3', cover: 'https://myanimelist.net/images/anime/1015/151233l.jpg' },
-  // Adicione mais itens com os IDs correspondentes para preencher o grid
-];
+interface SeasonGroup {
+  id: string;
+  temporada_ano: number | null;
+  temporada_estacao: number | null;
+  estacao_nome: string;
+  name: string;
+  total: number;
+  animes: SeasonAnimeItem[];
+}
 
+function getSeasonIconName(estacao: number | null): keyof typeof Ionicons.glyphMap {
+  switch (Number(estacao)) {
+    case 1:
+      return 'snow-outline'; // Inverno
+    case 2:
+      return 'flower-outline'; // Primavera
+    case 3:
+      return 'sunny-outline'; // Verão
+    case 4:
+      return 'leaf-outline'; // Outono
+    default:
+      return 'calendar-outline';
+  }
+}
 
+function formatEstacaoLabel(estacao: number | null): string {
+  switch (Number(estacao)) {
+    case 1:
+      return 'Inverno';
+    case 2:
+      return 'Primavera';
+    case 3:
+      return 'Verão';
+    case 4:
+      return 'Outono';
+    default:
+      return 'Outros';
+  }
+}
 
-export default function SeasonsScreen() {
-
-
-   useEffect(() => {
-    // Fazemos uma única chamada para a rota do Laravel que montamos
-    api.get("/temporadas/lista")
-      .then((response) => {
-        // O Laravel já manda o array prontinho na ordem certa
-        // console.log(response.data)
-        // console.log("#####rr")
-        // setLayout(response.data);
-        // setLoading(false);
-      })
-      .catch((error) => {
-        console.error('Erro ao buscar o layout da home:', error);
-        // setLoading(false);
-      });
-  }, []);
-
-
-
-
-
-  const [selectedSeason, setSelectedSeason] = useState(SEASONS[0].id);
-
-  // Filtra os animes com base na temporada selecionada
-  const filteredAnimes = ANIMES.filter(anime => anime.seasonId === selectedSeason);
-
-  // Renderiza as "abas" de seleção de temporada
-  const renderSeasonTab = ({ item }:any) => (
-    <Pressable
-      onPress={() => setSelectedSeason(item.id)}
-      style={({ focused }) => [
-        styles.seasonTab,
-        selectedSeason === item.id && styles.seasonTabActive,
-        focused && styles.focusedElement // Destaque ao passar o D-Pad
-      ]}
-    >
-      <Text style={[
-        styles.seasonText,
-        selectedSeason === item.id && styles.seasonTextActive
-      ]}>
-        {item.name}
-      </Text>
-    </Pressable>
-  );
-
-  // Renderiza o card do anime no grid
-  const renderAnimeCard = ({ item }:any) => (
-    <Pressable
-      onPress={() => console.log('Navegar para os detalhes do anime: ', item.id)}
-      style={({ focused }) => [
-        styles.animeCard,
-        focused && styles.focusedElement // Efeito visual de foco para TV
-      ]}
-    >
-      <Image source={{ uri: item.cover }} style={styles.coverImage} />
-      <Text style={styles.animeTitle} numberOfLines={2}>{item.title}</Text>
-    </Pressable>
-  );
+function SeasonAnimeCard({ anime }: { anime: SeasonAnimeItem }) {
+  const router = useRouter();
+  const posterUrl = normalizeImageUrl(anime.cover || anime.imagem);
+  const nota = anime.nota_mal || anime.nota_tmdb;
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.screenTitle}>Temporadas</Text>
+    <Pressable
+      focusable={true}
+      onPress={() => router.push(`/anime/${anime.id}` as any)}
+      android_ripple={{ color: 'rgba(51, 153, 255, 0.25)' }}
+      style={({ focused, pressed }) => [
+        styles.card,
+        (focused || pressed) && styles.cardFocused,
+      ]}
+    >
+      {({ focused, pressed }) => {
+        const isActive = focused || pressed;
+        return (
+          <View style={styles.cardInner}>
+            <View style={[styles.posterWrapper, isActive && styles.posterWrapperFocused]}>
+              <Image
+                source={{ uri: posterUrl }}
+                style={styles.image}
+                contentFit="cover"
+                transition={150}
+                cachePolicy="disk"
+              />
 
-      {/* Seletor de Temporadas (Lista Horizontal) */}
-      <View style={styles.header}>
-        <FlatList
-          horizontal
-          data={SEASONS}
-          keyExtractor={item => item.id}
-          renderItem={renderSeasonTab}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.seasonsList}
-        />
-      </View>
+              <LinearGradient
+                colors={['transparent', 'rgba(11, 11, 12, 0.35)', 'rgba(11, 11, 12, 0.95)']}
+                style={styles.posterGradient}
+              />
 
-      {/* Grid de Animes (Lista Vertical com N colunas) */}
-      <FlatList
-        key={`grid-${selectedSeason}`} // Força a re-renderização suave ao trocar de temporada
-        data={filteredAnimes}
-        keyExtractor={item => item.id}
-        numColumns={5} // Ajuste para 4, 5 ou 6 dependendo da resolução alvo da TV
-        renderItem={renderAnimeCard}
-        contentContainerStyle={styles.grid}
-        columnWrapperStyle={styles.gridRow} // Espaçamento entre colunas
-      />
-    </View>
+              {/* Nota no topo esquerdo */}
+              {!!nota && (
+                <View style={styles.scoreBadge}>
+                  <Text style={styles.scoreBadgeText}>★ {Number(nota).toFixed(1)}</Text>
+                </View>
+              )}
+
+              {/* Badges no topo direito (No Ar / Nyaa) */}
+              <View style={styles.rightBadgesRow}>
+                {Number(anime.status) === 1 && (
+                  <View style={styles.airingBadge}>
+                    <Text style={styles.airingBadgeText}>NO AR</Text>
+                  </View>
+                )}
+                {Number(anime.nyaa_animes_count) > 0 && (
+                  <View style={styles.nyaaBadge}>
+                    <Text style={styles.nyaaBadgeText}>NYAA</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Indicador de Play ao focar com o controle da TV */}
+              {isActive && (
+                <View style={styles.playOverlay}>
+                  <View style={styles.playButtonCircle}>
+                    <Ionicons name="play" size={22} color="#FFF" style={{ marginLeft: 2 }} />
+                  </View>
+                </View>
+              )}
+
+              {/* Quantidade de temporadas na base do poster quando houver mais de 1 */}
+              {Number(anime.temporadas_count) > 1 && (
+                <View style={styles.seasonCountChip}>
+                  <Text style={styles.seasonCountChipText}>
+                    {anime.temporadas_count} Temporadas
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.infoContainer}>
+              <Text
+                style={[styles.cardTitle, isActive && styles.cardTitleFocused]}
+                numberOfLines={2}
+              >
+                {anime.title || anime.nome}
+              </Text>
+            </View>
+          </View>
+        );
+      }}
+    </Pressable>
   );
 }
 
+export default function SeasonsScreen() {
+  const { theme } = useTheme();
+  const [seasons, setSeasons] = useState<SeasonGroup[]>([]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSeasons = async () => {
+      setLoading(true);
+      try {
+        const response = await api.get('/temporadas/lista');
+        const raw = Array.isArray(response.data) ? response.data : [];
+
+        const normalized: SeasonGroup[] = raw
+          .map((item: any, idx: number) => {
+            const ano = item.temporada_ano ?? null;
+            const estacao = item.temporada_estacao ?? null;
+            const estacaoNome = item.estacao_nome || formatEstacaoLabel(estacao);
+            const id = item.id ? String(item.id) : `${ano || 'sem'}-${estacao || idx}`;
+            const name =
+              item.name ||
+              (ano && estacao ? `${estacaoNome} ${ano}` : 'Sem Temporada');
+            const animesList = Array.isArray(item.animes) ? item.animes : [];
+
+            return {
+              id,
+              temporada_ano: ano,
+              temporada_estacao: estacao,
+              estacao_nome: estacaoNome,
+              name,
+              total: item.total ?? animesList.length,
+              animes: animesList,
+            };
+          })
+          .filter((s: SeasonGroup) => s.animes.length > 0 || s.temporada_ano !== null);
+
+        setSeasons(normalized);
+        if (normalized.length > 0) {
+          setSelectedSeasonId(normalized[0].id);
+        }
+      } catch (error) {
+        console.error('Erro ao buscar temporadas de animes:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSeasons();
+  }, []);
+
+  const currentSeason = seasons.find((s) => s.id === selectedSeasonId) || seasons[0] || null;
+  const filteredAnimes = currentSeason?.animes || [];
+
+  const menuItems: MenuItem[] = [
+    { icon: 'home', label: 'Início', route: '/' },
+    { icon: 'home', label: 'Temporadas', route: '/seasons' },
+    { icon: 'home', label: 'AN', route: '/an' },
+    { icon: 'home', label: 'BR', route: '/br' },
+    { icon: 'magnet', label: 'NYAA', route: '/nyaa' },
+    { icon: 'user', label: 'Perfil', route: '/perfil' },
+  ];
+
+  const renderSeasonTab = ({ item }: { item: SeasonGroup }) => {
+    const isSelected = item.id === (currentSeason?.id || selectedSeasonId);
+    const iconName = getSeasonIconName(item.temporada_estacao);
+
+    return (
+      <Pressable
+        focusable={true}
+        onPress={() => setSelectedSeasonId(item.id)}
+        style={({ focused, pressed }) => [
+          styles.seasonTab,
+          isSelected && styles.seasonTabSelected,
+          (focused || pressed) && styles.seasonTabFocused,
+        ]}
+      >
+        {({ focused, pressed }) => {
+          const isActive = focused || pressed;
+          return (
+            <View style={styles.seasonTabInner}>
+              <Ionicons
+                name={iconName}
+                size={15}
+                color={isSelected || isActive ? '#FFFFFF' : '#9CA3AF'}
+              />
+              <Text
+                style={[
+                  styles.seasonTabText,
+                  isSelected && styles.seasonTabTextSelected,
+                  isActive && styles.seasonTabTextFocused,
+                ]}
+              >
+                {item.name}
+              </Text>
+              <View
+                style={[
+                  styles.seasonCountPill,
+                  isSelected && styles.seasonCountPillSelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.seasonCountPillText,
+                    isSelected && styles.seasonCountPillTextSelected,
+                  ]}
+                >
+                  {item.total}
+                </Text>
+              </View>
+            </View>
+          );
+        }}
+      </Pressable>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.screen}>
+      <SideMenuLayout menuItems={menuItems}>
+        <Header />
+
+        {loading ? (
+          <View style={styles.centerLoader}>
+            <ActivityIndicator size="large" color="#3399FF" />
+            <Text style={styles.loaderText}>Carregando temporadas de animes...</Text>
+          </View>
+        ) : (
+          <FlatList
+            key={`season-grid-${currentSeason?.id || 'default'}`}
+            numColumns={5}
+            data={filteredAnimes}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={({ item }) => <SeasonAnimeCard anime={item} />}
+            contentContainerStyle={styles.listContent}
+            columnWrapperStyle={styles.columnWrapper}
+            showsVerticalScrollIndicator={false}
+            ListHeaderComponent={
+              <View>
+                {/* Banner superior da tela de Temporadas */}
+                <View style={styles.headerBanner}>
+                  <View style={styles.headerTitleRow}>
+                    <View style={styles.accentBar} />
+                    <View>
+                      <Text
+                        style={[
+                          styles.headerTitle,
+                          { fontFamily: theme.fonts.heading },
+                        ]}
+                      >
+                        Temporadas • {currentSeason ? currentSeason.name : 'Catálogo'}
+                      </Text>
+                      <Text style={styles.headerSubtitle}>
+                        Navegue pelos animes lançados em cada estação do ano ({filteredAnimes.length} títulos nesta temporada)
+                      </Text>
+                    </View>
+                  </View>
+
+                  {currentSeason && (
+                    <View style={styles.liveBadge}>
+                      <Ionicons
+                        name={getSeasonIconName(currentSeason.temporada_estacao)}
+                        size={13}
+                        color="#3399FF"
+                      />
+                      <Text style={styles.liveBadgeText}>
+                        {currentSeason.name.toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Seletor Horizontal de Temporadas (Estação + Ano) */}
+                {seasons.length > 0 && (
+                  <View style={styles.seasonsBarWrapper}>
+                    <FlatList
+                      horizontal
+                      data={seasons}
+                      keyExtractor={(item) => item.id}
+                      renderItem={renderSeasonTab}
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.seasonsListContent}
+                    />
+                  </View>
+                )}
+              </View>
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyText}>
+                  Nenhum anime encontrado para esta temporada.
+                </Text>
+              </View>
+            }
+          />
+        )}
+      </SideMenuLayout>
+    </SafeAreaView>
+  );
+}
+
+const isTV = Platform.OS === 'android' && Platform.isTV;
+
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    backgroundColor: '#0F0F0F', // Fundo escuro clássico de apps de mídia
-    padding: 20,
+    backgroundColor: '#0B0B0C',
+    flexDirection: 'row',
   },
-  screenTitle: {
-    color: '#FFF',
-    fontSize: 28,
+  centerLoader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loaderText: {
+    color: '#9CA3AF',
+    marginTop: 12,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  listContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 48,
+  },
+  columnWrapper: {
+    gap: 10,
+    marginBottom: 18,
+  },
+  headerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    backgroundColor: '#14161D',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  accentBar: {
+    width: 4,
+    height: 36,
+    borderRadius: 4,
+    backgroundColor: '#3399FF',
+    marginRight: 14,
+  },
+  headerTitle: {
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 20,
-    marginLeft: 10,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
-  header: {
-    marginBottom: 30,
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 2,
   },
-  seasonsList: {
-    paddingLeft: 10,
-    gap: 15, // Espaçamento nativo do Flexbox
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(51, 153, 255, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(51, 153, 255, 0.4)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    gap: 6,
+  },
+  liveBadgeText: {
+    color: '#3399FF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+
+  // Barra Horizontal de Temporadas
+  seasonsBarWrapper: {
+    marginBottom: 22,
+  },
+  seasonsListContent: {
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    gap: 10,
   },
   seasonTab: {
+    backgroundColor: '#14161D',
     paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: '#222',
-    borderRadius: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
     borderWidth: 2,
-    borderColor: 'transparent',
-    marginRight: 10, // Fallback se gap não for suportado em versões antigas
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginRight: 10,
   },
-  seasonTabActive: {
-    backgroundColor: '#E50914', // Vermelho destaque
+  seasonTabSelected: {
+    backgroundColor: '#3399FF',
+    borderColor: '#66B2FF',
   },
-  seasonText: {
-    color: '#AAA',
-    fontSize: 16,
-    fontWeight: '600',
+  seasonTabFocused: {
+    borderColor: '#FFFFFF',
+    backgroundColor: '#222733',
+    transform: [{ scale: 1.06 }],
   },
-  seasonTextActive: {
-    color: '#FFF',
+  seasonTabInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  grid: {
-    paddingBottom: 50,
-  },
-  gridRow: {
-    justifyContent: 'flex-start',
-    gap: 20, // Espaço entre os cards na mesma linha
-    marginBottom: 20,
-  },
-  animeCard: {
-    width: 180, // Largura fixa ajuda na consistência do grid na TV
-    borderRadius: 8,
-    borderWidth: 3,
-    borderColor: 'transparent',
-    overflow: 'hidden',
-    backgroundColor: '#1A1A1A',
-  },
-  coverImage: {
-    width: '100%',
-    height: 270,
-    resizeMode: 'cover',
-  },
-  animeTitle: {
-    color: '#FFF',
+  seasonTabText: {
+    color: '#D1D5DB',
     fontSize: 14,
-    padding: 10,
+    fontWeight: '700',
+  },
+  seasonTabTextSelected: {
+    color: '#FFFFFF',
+  },
+  seasonTabTextFocused: {
+    color: '#FFFFFF',
+  },
+  seasonCountPill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  seasonCountPillSelected: {
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+  },
+  seasonCountPillText: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  seasonCountPillTextSelected: {
+    color: '#FFFFFF',
+  },
+
+  // Cards de Anime no Grid
+  card: {
+    width: isTV ? 154 : 150,
+    borderRadius: 12,
+  },
+  cardFocused: {
+    transform: [{ scale: 1.05 }],
+    zIndex: 10,
+  },
+  cardInner: {
+    width: '100%',
+  },
+  posterWrapper: {
+    width: '100%',
+    height: isTV ? 230 : 224,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#181A20',
+    borderWidth: 2.5,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    position: 'relative',
+  },
+  posterWrapperFocused: {
+    borderColor: '#3399FF',
+    shadowColor: '#3399FF',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+  posterGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '55%',
+  },
+  scoreBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: 'rgba(11, 11, 12, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(243, 156, 18, 0.5)',
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+  },
+  scoreBadgeText: {
+    color: '#FBBF24',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  rightBadgesRow: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  airingBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  airingBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  nyaaBadge: {
+    backgroundColor: 'rgba(147, 51, 234, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  nyaaBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(11, 11, 12, 0.28)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButtonCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(51, 153, 255, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  seasonCountChip: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    right: 8,
+    backgroundColor: 'rgba(20, 22, 29, 0.85)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  seasonCountChipText: {
+    color: '#D1D5DB',
+    fontSize: 10,
+    fontWeight: '600',
     textAlign: 'center',
   },
-  focusedElement: {
-    // A mágica da TV acontece aqui
-    borderColor: '#FFF',
-    transform: [{ scale: 1.05 }], // Leve zoom quando o usuário foca com o controle
-    elevation: 10, 
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 5,
+  infoContainer: {
+    paddingTop: 8,
+    paddingHorizontal: 4,
+  },
+  cardTitle: {
+    fontWeight: '600',
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
+  cardTitleFocused: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
+  emptyBox: {
+    paddingVertical: 60,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#9CA3AF',
+    fontSize: 15,
   },
 });

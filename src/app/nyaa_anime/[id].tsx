@@ -17,6 +17,7 @@ import Header from '../../components/Header';
 import SideMenuLayout, { MenuItem } from '../../components/SideMenuLayout';
 import { useTheme } from '../../theme/ThemeContext';
 import api from '@/services/api';
+import { normalizeImageUrl } from '@/utils/episodeStore';
 
 interface NyaaAnimeDetails {
   id: number;
@@ -136,7 +137,7 @@ export default function NyaaAnimeDetailsScreen() {
             ListHeaderComponent={
               anime ? (
                 <View style={styles.headerContainer}>
-                  <Image source={{ uri: anime.img }} style={styles.poster} />
+                  <Image source={{ uri: normalizeImageUrl(anime.img) }} style={styles.poster} />
                   <View style={styles.infoContainer}>
                     <Text style={[styles.animeTitle, { fontFamily: theme.fonts.heading }]}>
                       {anime.nome}

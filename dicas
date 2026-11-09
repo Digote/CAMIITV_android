@@ -9,7 +9,7 @@ npx eas build --profile preview_tv --platform android
 
 
 update
-npx eas update --channel preview --message "sua mensagem de atualização"
+npx eas update --channel preview --message "sua mensagem de atualização" --environment production
 
 
 rodar
