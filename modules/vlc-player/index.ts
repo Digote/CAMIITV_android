@@ -44,6 +44,20 @@ export interface VlcProgressPayload {
   duration: number;
   position: number;
   isPlaying: boolean;
+  /** true no evento emitido logo após um seek, antes da confirmação do libVLC */
+  seeking?: boolean;
+}
+
+export interface VlcSeekCompletePayload {
+  /** Posição real reportada pelo libVLC após o seek */
+  currentTime: number;
+  /** Posição pedida */
+  targetTime: number;
+  duration: number;
+  /** Tempo entre o pedido e a confirmação */
+  tookMs: number;
+  /** true quando o seek foi liberado por timeout, sem chegar perto do alvo */
+  timedOut: boolean;
 }
 
 export interface VlcBufferingPayload {
@@ -92,6 +106,7 @@ export interface CamiiVlcPlayerProps extends ViewProps {
   onBuffering?: (event: { nativeEvent: VlcBufferingPayload }) => void;
   onEnded?: (event: { nativeEvent: VlcStatePayload }) => void;
   onError?: (event: { nativeEvent: VlcErrorPayload }) => void;
+  onSeekComplete?: (event: { nativeEvent: VlcSeekCompletePayload }) => void;
 }
 
 let cachedModule: any = null;

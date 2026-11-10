@@ -2,10 +2,13 @@ package expo.modules.vlcplayer
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import kotlin.math.abs
 import android.view.ViewGroup
 import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.ReactContext
@@ -36,6 +39,7 @@ class CamiiVlcPlayerView(
   internal val onEnded by EventDispatcher<Map<String, Any?>>()
   internal val onError by EventDispatcher<Map<String, Any?>>()
   internal val onTracksChanged by EventDispatcher<Map<String, Any?>>()
+  internal val onSeekComplete by EventDispatcher<Map<String, Any?>>()
 
   private var libVlc: LibVLC? = null
   private var mediaPlayer: MediaPlayer? = null
@@ -62,6 +66,23 @@ class CamiiVlcPlayerView(
   private var lastTracksHash: String = ""
   private var hasEmittedLoad: Boolean = false
   private var wasPlayingBeforeHostPause: Boolean = false
+
+  // Seek em andamento: enquanto o libVLC não reportar um tempo próximo do alvo,
+  // os TimeChanged antigos (posição anterior ao seek) não são repassados ao JS.
+  private var pendingSeekTargetMs: Long? = null
+  private var pendingSeekStartedAt: Long = 0L
+  private var pendingSeekFromMs: Long = 0L
+
+  private val isDebuggableApp: Boolean =
+    (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+  companion object {
+    private const val TAG = "CamiiVlcPlayerView"
+    // Distância máxima entre o tempo reportado e o alvo para considerar o seek concluído
+    private const val SEEK_TOLERANCE_MS = 1500L
+    // Libera o estado de seek mesmo sem confirmação (stream que não suporta seek preciso, rede lenta etc.)
+    private const val SEEK_TIMEOUT_MS = 10000L
+  }
 
   init {
     keepScreenOn = true
@@ -152,9 +173,12 @@ class CamiiVlcPlayerView(
           "--clock-jitter=0",
           "--clock-synchro=0",
           "--freetype-rel-fontsize=16",
-          "--sub-text-scale=100",
-          "-vv"
+          "--sub-text-scale=100"
         )
+        // Log verboso do libVLC só em build de debug (custa CPU na Fire TV Stick)
+        if (isDebuggableApp) {
+          options.add("-vv")
+        }
 
         val vlc = LibVLC(context.applicationContext, options)
         libVlc = vlc
@@ -253,7 +277,8 @@ class CamiiVlcPlayerView(
         keepScreenOn = true
         if (!hasAppliedStartPosition && startPositionMs > 0L) {
           hasAppliedStartPosition = true
-          player.setTime(startPositionMs, true)
+          // Retomada (reload/retry) também precisa ser precisa, senão volta até ~10s
+          player.setTime(startPositionMs, false)
         }
         if (desiredSubtitleDelayMs != 0L) {
           player.setSpuDelay(desiredSubtitleDelayMs * 1000L)
@@ -279,6 +304,18 @@ class CamiiVlcPlayerView(
       }
 
       MediaPlayer.Event.TimeChanged -> {
+        val reportedTime = event.timeChanged.coerceAtLeast(0L)
+        val pendingTarget = pendingSeekTargetMs
+        if (pendingTarget != null) {
+          val reachedTarget = abs(reportedTime - pendingTarget) <= SEEK_TOLERANCE_MS
+          val elapsed = SystemClock.elapsedRealtime() - pendingSeekStartedAt
+          if (!reachedTarget && elapsed < SEEK_TIMEOUT_MS) {
+            // Evento com a posição anterior ao seek: não repassa ao JS
+            return@EventListener
+          }
+          completePendingSeek(player, reportedTime, timedOut = !reachedTarget)
+        }
+
         val now = System.currentTimeMillis()
         if (now - lastProgressEmitMs >= 200L) {
           lastProgressEmitMs = now
@@ -309,6 +346,7 @@ class CamiiVlcPlayerView(
 
       MediaPlayer.Event.EndReached -> {
         keepScreenOn = false
+        clearPendingSeek()
         val totalLen = player.getLength().coerceAtLeast(0L)
         if (!hasEmittedLoad && totalLen <= 0L) {
           onError(
@@ -329,6 +367,7 @@ class CamiiVlcPlayerView(
 
       MediaPlayer.Event.EncounteredError -> {
         keepScreenOn = false
+        clearPendingSeek()
         onError(
           mapOf(
             "message" to "Falha ao reproduzir o stream de vídeo no LibVLC.",
@@ -503,38 +542,92 @@ class CamiiVlcPlayerView(
     player.updateVideoSurfaces()
   }
 
+  /**
+   * Seek absoluto e PRECISO.
+   *
+   * Antes era usado setTime(target, fast = true), que faz o libVLC pular para o keyframe
+   * ANTERIOR ao alvo. Em releases de anime os keyframes ficam a ~8–12s um do outro, então
+   * um +5s caía sempre no mesmo keyframe e o vídeo "voltava para o mesmo ponto"
+   * (confirmado no logcat da Fire TV: 4 seeks seguidos no mesmo PTS 12.57s).
+   *
+   * Executado na main thread para não concorrer com startPlayback/releasePlayer
+   * nem com o EventListener do libVLC (que também roda na main thread).
+   */
   fun seekToMs(timeMs: Long) {
+    mainHandler.post { performSeek(timeMs) }
+  }
+
+  fun seekByMs(deltaMs: Long) {
+    mainHandler.post {
+      val player = mediaPlayer ?: return@post
+      if (player.isReleased) return@post
+      // Se já há um seek pendente, soma a partir do alvo pendente (cliques rápidos)
+      val base = pendingSeekTargetMs ?: player.getTime().coerceAtLeast(0L)
+      performSeek(base + deltaMs)
+    }
+  }
+
+  private fun performSeek(timeMs: Long) {
     val player = mediaPlayer ?: return
     if (player.isReleased) return
     val length = player.getLength()
     val target = if (length > 0L) timeMs.coerceIn(0L, length) else timeMs.coerceAtLeast(0L)
-    player.setTime(target, true)
+    val from = player.getTime().coerceAtLeast(0L)
+
+    pendingSeekTargetMs = target
+    pendingSeekStartedAt = SystemClock.elapsedRealtime()
+    pendingSeekFromMs = from
+
+    Log.d(TAG, "seek: from=${from}ms target=${target}ms length=${length}ms playing=${player.isPlaying}")
+    player.setTime(target, false)
+
     onProgress(
       mapOf(
         "currentTime" to target.toDouble(),
         "duration" to length.coerceAtLeast(0L).toDouble(),
         "position" to if (length > 0L) (target.toDouble() / length.toDouble()) else 0.0,
-        "isPlaying" to player.isPlaying()
+        "isPlaying" to player.isPlaying(),
+        "seeking" to true
       )
     )
   }
 
-  fun seekByMs(deltaMs: Long) {
-    val player = mediaPlayer ?: return
-    if (player.isReleased) return
-    val current = player.getTime().coerceAtLeast(0L)
-    seekToMs(current + deltaMs)
+  private fun completePendingSeek(player: MediaPlayer, reportedTimeMs: Long, timedOut: Boolean) {
+    val target = pendingSeekTargetMs ?: return
+    val tookMs = SystemClock.elapsedRealtime() - pendingSeekStartedAt
+    pendingSeekTargetMs = null
+
+    Log.d(
+      TAG,
+      "seek concluído: from=${pendingSeekFromMs}ms target=${target}ms real=${reportedTimeMs}ms " +
+        "erro=${reportedTimeMs - target}ms tempo=${tookMs}ms timeout=$timedOut"
+    )
+
+    onSeekComplete(
+      mapOf(
+        "currentTime" to reportedTimeMs.toDouble(),
+        "targetTime" to target.toDouble(),
+        "duration" to player.getLength().coerceAtLeast(0L).toDouble(),
+        "tookMs" to tookMs.toDouble(),
+        "timedOut" to timedOut
+      )
+    )
+  }
+
+  private fun clearPendingSeek() {
+    pendingSeekTargetMs = null
   }
 
   fun releasePlayer() {
+    clearPendingSeek()
     val player = mediaPlayer
     mediaPlayer = null
     if (player != null) {
       try {
         player.setEventListener(null)
-        if (player.isPlaying) {
-          player.stop()
-        }
+        // Sempre para antes de soltar a superfície: durante seek/buffering isPlaying é false,
+        // e soltar a superfície com o MediaCodec ativo gerava DecoderErrorFatal no logcat.
+        player.stop()
         player.detachViews()
         player.release()
       } catch (e: Exception) {

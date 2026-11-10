@@ -20,7 +20,8 @@ class CamiiVlcPlayerModule : Module() {
         "onBuffering",
         "onEnded",
         "onError",
-        "onTracksChanged"
+        "onTracksChanged",
+        "onSeekComplete"
       )
 
       Prop("source") { view: CamiiVlcPlayerView, source: Map<String, Any?>? ->
