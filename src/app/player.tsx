@@ -97,7 +97,26 @@ export default function InternalVlcPlayerScreen() {
   // UI / OSD state
   const [controlsVisible, setControlsVisible] = useState(true);
   const [timelineFocused, setTimelineFocused] = useState(false);
-  const [activeModal, setActiveModal] = useState<'none' | 'subtitles' | 'audio' | 'aspect' | 'speed'>('none');
+  const [activeModal, setActiveModal] = useState<'none' | 'subtitles' | 'audio' | 'aspect' | 'speed' | 'more'>('none');
+  const [currentClock, setCurrentClock] = useState(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
+
+  // Estado de scrubbing / busca na timeline (avanço de 1 em 1 minuto com debounce antes de reproduzir)
+  const [scrubbingTimeMs, setScrubbingTimeMs] = useState<number | null>(null);
+  const scrubbingTimeRef = useRef<number | null>(null);
+  const scrubbingDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Atualiza o relógio no topo a cada 10 segundos
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentClock(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    };
+    const interval = setInterval(updateTime, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Visual seek feedback indicator (+5s / -5s)
   const [seekFeedback, setSeekFeedback] = useState<{
@@ -112,13 +131,14 @@ export default function InternalVlcPlayerScreen() {
   const pausedRef = useRef(false);
   const controlsVisibleRef = useRef(true);
   const timelineFocusedRef = useRef(false);
-  const activeModalRef = useRef<'none' | 'subtitles' | 'audio' | 'aspect' | 'speed'>('none');
+  const activeModalRef = useRef<'none' | 'subtitles' | 'audio' | 'aspect' | 'speed' | 'more'>('none');
   const autoAppliedTracksRef = useRef(false);
   const hasStartedPlaybackRef = useRef(false);
   const startTimeWallRef = useRef(Date.now());
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accumulatedSeekSecRef = useRef(0);
+  const lastUserSeekTimestampRef = useRef<number>(0);
 
   const seekStepSec = settings.seekStepSeconds || 5;
 
@@ -171,6 +191,7 @@ export default function InternalVlcPlayerScreen() {
     return () => {
       if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       if (seekFeedbackTimerRef.current) clearTimeout(seekFeedbackTimerRef.current);
+      if (scrubbingDebounceTimerRef.current) clearTimeout(scrubbingDebounceTimerRef.current);
     };
   }, [session, router, scheduleHideControls]);
 
@@ -189,6 +210,46 @@ export default function InternalVlcPlayerScreen() {
     }
   }, [router, session]);
 
+  // Aplica o seek efetivo após soltar as teclas de avanço na barra (debounce de 900ms)
+  const commitTimelineScrub = useCallback(() => {
+    if (scrubbingDebounceTimerRef.current) {
+      clearTimeout(scrubbingDebounceTimerRef.current);
+    }
+    scrubbingDebounceTimerRef.current = setTimeout(() => {
+      const targetTime = scrubbingTimeRef.current;
+      if (targetTime !== null) {
+        currentTimeRef.current = targetTime;
+        setCurrentTimeMs(targetTime);
+        playerRef.current?.seekTo(targetTime);
+        scrubbingTimeRef.current = null;
+        setScrubbingTimeMs(null);
+      }
+    }, 900);
+  }, []);
+
+  // Ajusta a posição da barra em 1 minuto (+60s ou -60s) sem pular o vídeo na hora
+  const adjustTimelineScrub = useCallback(
+    (deltaSeconds: number) => {
+      const maxTime = durationRef.current;
+      const baseTime =
+        scrubbingTimeRef.current !== null
+          ? scrubbingTimeRef.current
+          : currentTimeRef.current;
+      const deltaMs = deltaSeconds * 1000;
+      const nextTime =
+        maxTime > 0
+          ? Math.max(0, Math.min(maxTime, baseTime + deltaMs))
+          : Math.max(0, baseTime + deltaMs);
+
+      scrubbingTimeRef.current = nextTime;
+      setScrubbingTimeMs(nextTime);
+
+      showControls();
+      commitTimelineScrub();
+    },
+    [commitTimelineScrub, showControls]
+  );
+
   // Perform relative seek (e.g. -5s or +5s) with cumulative visual indicator
   const performSeekBySeconds = useCallback((deltaSeconds: number) => {
     const deltaMs = deltaSeconds * 1000;
@@ -199,6 +260,7 @@ export default function InternalVlcPlayerScreen() {
         ? Math.max(0, Math.min(maxTime, baseTime + deltaMs))
         : Math.max(0, baseTime + deltaMs);
 
+    lastUserSeekTimestampRef.current = Date.now();
     currentTimeRef.current = nextTime;
     setCurrentTimeMs(nextTime);
     playerRef.current?.seekTo(nextTime);
@@ -245,66 +307,65 @@ export default function InternalVlcPlayerScreen() {
     return () => sub.remove();
   }, [handleExitPlayer, showControls]);
 
-  // Intercept TV Remote D-Pad events (Left/Right for 5s seek, Up/Down/Select for OSD)
+  // Intercept TV Remote D-Pad events (Left/Right for seek, Up/Down/Select for OSD)
   useTVEventHandler((evt: any) => {
     if (!evt || !evt.eventType) return;
-    // Only act on key release (1) or when eventKeyAction is undefined
-    if (evt.eventKeyAction !== undefined && evt.eventKeyAction !== 1) return;
 
+    // Reconhece tanto eventos com eventKeyAction (1 = up/release, 0 = down) quanto undefined
+    const isKeyDown = evt.eventKeyAction === 0;
+    const isKeyUp = evt.eventKeyAction === 1 || evt.eventKeyAction === undefined;
     const type = evt.eventType;
 
-    // Keep OSD alive when user navigates while OSD is visible
-    if (controlsVisibleRef.current && activeModalRef.current === 'none') {
-      scheduleHideControls();
-    }
-
-    if (type === 'playPause') {
-      togglePlayPause();
-      return;
-    }
-
-    if (type === 'fastForward') {
-      performSeekBySeconds(seekStepSec);
-      return;
-    }
-
-    if (type === 'rewind') {
-      performSeekBySeconds(-seekStepSec);
-      return;
-    }
-
-    // If a modal is open, let standard React Native focus navigation handle D-Pad
+    // Se um modal de configuração estiver aberto, deixa a navegação nativa operar
     if (activeModalRef.current !== 'none') {
       return;
     }
 
-    // When OSD is hidden -> D-pad Left/Right immediately seeks -5s / +5s like VLC!
+    // Ações para playPause / avanço dedicado do controle
+    if (isKeyUp && type === 'playPause') {
+      togglePlayPause();
+      return;
+    }
+    if (isKeyUp && type === 'fastForward') {
+      performSeekBySeconds(seekStepSec);
+      return;
+    }
+    if (isKeyUp && type === 'rewind') {
+      performSeekBySeconds(-seekStepSec);
+      return;
+    }
+
+    // 1. QUANDO OS BOTÕES ESTÃO ESCONDIDOS (Controles ocultos):
+    // Pressionar Direita/Esquerda retrocede ou avança imediatamente 5s no vídeo!
     if (!controlsVisibleRef.current) {
-      if (type === 'right') {
+      if (isKeyUp && (type === 'right' || type === 'swipeRight')) {
         performSeekBySeconds(seekStepSec);
         return;
       }
-      if (type === 'left') {
+      if (isKeyUp && (type === 'left' || type === 'swipeLeft')) {
         performSeekBySeconds(-seekStepSec);
         return;
       }
-      if (type === 'up' || type === 'down') {
+      if (isKeyUp && (type === 'up' || type === 'down' || type === 'select')) {
         showControls();
         return;
       }
-      if (type === 'select') {
-        togglePlayPause();
-        return;
-      }
-    } else if (timelineFocusedRef.current) {
-      // When focus is on the progress timeline bar, Left/Right also seeks -5s / +5s!
-      if (type === 'right') {
-        performSeekBySeconds(seekStepSec);
-        return;
-      }
-      if (type === 'left') {
-        performSeekBySeconds(-seekStepSec);
-        return;
+    } else {
+      // 2. QUANDO OS CONTROLES ESTÃO VISÍVEIS:
+      scheduleHideControls();
+
+      // Se o foco estiver especificamente na BARRA DE PROGRESSO (timeline):
+      // As setas Direita/Esquerda agora alteram a barra de 1 em 1 minuto (+60s / -60s)
+      // segurando ou clicando, esperando 900ms antes de reproduzir onde parou!
+      if (timelineFocusedRef.current && isKeyUp) {
+        if (type === 'right' || type === 'swipeRight') {
+          adjustTimelineScrub(60);
+          return;
+        }
+        if (type === 'left' || type === 'swipeLeft') {
+          adjustTimelineScrub(-60);
+          return;
+        }
       }
     }
   });
@@ -479,9 +540,10 @@ export default function InternalVlcPlayerScreen() {
     return <View style={styles.container} />;
   }
 
+  const displayedTimeMs = scrubbingTimeMs !== null ? scrubbingTimeMs : currentTimeMs;
   const progressFraction =
-    durationMs > 0 ? Math.min(1, Math.max(0, currentTimeMs / durationMs)) : 0;
-  const remainingMs = Math.max(0, durationMs - currentTimeMs);
+    durationMs > 0 ? Math.min(1, Math.max(0, displayedTimeMs / durationMs)) : 0;
+  const remainingMs = Math.max(0, durationMs - displayedTimeMs);
 
   const activeSubtitleLabel =
     selectedSubtitleId === -1
@@ -530,6 +592,11 @@ export default function InternalVlcPlayerScreen() {
             onProgress={(e) => {
               if (e.nativeEvent.currentTime > 0 || e.nativeEvent.duration > 0) {
                 hasStartedPlaybackRef.current = true;
+              }
+              // Ignora eventos de progresso antigos que chegam logo após o usuário solicitar um seek
+              // para não "puxar" o vídeo de volta para a posição anterior
+              if (Date.now() - lastUserSeekTimestampRef.current < 650) {
+                return;
               }
               setCurrentTimeMs(e.nativeEvent.currentTime);
               if (e.nativeEvent.duration > 0) {
@@ -625,7 +692,10 @@ export default function InternalVlcPlayerScreen() {
             focusable={true}
             onPress={showControls}
             style={StyleSheet.absoluteFill}
-          />
+          >
+            {/* Invisível, apenas retém foco no Android TV */}
+            <View style={{ width: 1, height: 1 }} />
+          </Pressable>
         )}
 
         {/* Camada 3: Indicador de Carregamento / Buffering (com botão Tentar Novamente se demorar > 5s) */}
@@ -793,9 +863,9 @@ export default function InternalVlcPlayerScreen() {
         {/* Camada 6: OSD Completo Estilo VLC Android TV */}
         {controlsVisible && nativeAvailable && (
           <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-            {/* Topo: Título do Episódio + Info Técnica (MKV / Resolução / ASS) */}
+            {/* Topo: Título do Episódio + Hora Atual */}
             <LinearGradient
-              colors={['rgba(0,0,0,0.88)', 'rgba(0,0,0,0.45)', 'transparent']}
+              colors={['rgba(0,0,0,0.82)', 'rgba(0,0,0,0.35)', 'transparent']}
               style={styles.topGradient}
             >
               <View style={styles.topRow}>
@@ -807,7 +877,7 @@ export default function InternalVlcPlayerScreen() {
                     (focused || pressed) && styles.osdBtnFocused,
                   ]}
                 >
-                  <Ionicons name="arrow-back" size={20} color="#FFF" />
+                  <Ionicons name="arrow-back" size={18} color="#FFF" />
                   <Text style={styles.topBackText}>Sair</Text>
                 </Pressable>
 
@@ -822,11 +892,10 @@ export default function InternalVlcPlayerScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.techBadgesRow}>
-                  <View style={styles.vlcBrandBadge}>
-                    <Ionicons name="play" size={12} color="#FF8800" />
-                    <Text style={styles.vlcBrandBadgeText}>LibVLC • ASS/MKV</Text>
-                  </View>
+                {/* Hora Atual no Topo Direito */}
+                <View style={styles.clockContainer}>
+                  <Ionicons name="time-outline" size={14} color="#9CA3AF" />
+                  <Text style={styles.clockText}>{currentClock}</Text>
                   {videoDimensions.h > 0 && (
                     <View style={styles.resTechBadge}>
                       <Text style={styles.resTechBadgeText}>
@@ -838,41 +907,60 @@ export default function InternalVlcPlayerScreen() {
               </View>
             </LinearGradient>
 
-            {/* Base: Barra de Progresso + Controles Estilo VLC */}
+            {/* Base: Barra de Progresso Interativa + Controles Centralizados */}
             <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.72)', 'rgba(0,0,0,0.95)']}
+              colors={['transparent', 'rgba(0,0,0,0.65)', 'rgba(0,0,0,0.92)']}
               style={styles.bottomGradient}
             >
-              {/* Dica rápida das setas do controle */}
-              <View style={styles.remoteHintRow}>
-                <Text style={styles.remoteHintText}>
-                  💡 Dica: Use as setas ◀ e ▶ do controle para retroceder/avançar {seekStepSec}s a qualquer momento
+              {/* Barra de Progresso / Seekbar Focável e Clicável na TV */}
+              <View style={styles.timelineRow}>
+                <Text style={[styles.timeText, scrubbingTimeMs !== null && styles.timeTextScrubbing]}>
+                  {formatTimeMs(displayedTimeMs)}
                 </Text>
-                {subtitleDelayMs !== 0 && (
-                  <Text style={styles.subDelayBadgeText}>
-                    Sincronia Legenda: {subtitleDelayMs > 0 ? `+${subtitleDelayMs}ms` : `${subtitleDelayMs}ms`}
-                  </Text>
-                )}
-              </View>
 
-              {/* Barra de Progresso / Seekbar Focável */}
-              <Pressable
-                focusable={true}
-                onFocus={() => setTimelineFocused(true)}
-                onBlur={() => setTimelineFocused(false)}
-                onPress={togglePlayPause}
-                style={({ focused }) => [
-                  styles.timelinePressable,
-                  focused && styles.timelinePressableFocused,
-                ]}
-              >
-                <Text style={styles.timeText}>{formatTimeMs(currentTimeMs)}</Text>
-
-                <View style={styles.progressBarTrack}>
+                <Pressable
+                  focusable={true}
+                  onFocus={() => {
+                    setTimelineFocused(true);
+                    showControls();
+                  }}
+                  onBlur={() => {
+                    setTimelineFocused(false);
+                    // Se sair da barra antes do debounce, aplica imediatamente
+                    if (scrubbingTimeRef.current !== null) {
+                      if (scrubbingDebounceTimerRef.current) clearTimeout(scrubbingDebounceTimerRef.current);
+                      const target = scrubbingTimeRef.current;
+                      currentTimeRef.current = target;
+                      setCurrentTimeMs(target);
+                      playerRef.current?.seekTo(target);
+                      scrubbingTimeRef.current = null;
+                      setScrubbingTimeMs(null);
+                    }
+                  }}
+                  onPress={() => {
+                    // Clicar em OK na barra enquanto busca aplica a posição na hora
+                    if (scrubbingTimeRef.current !== null) {
+                      if (scrubbingDebounceTimerRef.current) clearTimeout(scrubbingDebounceTimerRef.current);
+                      const target = scrubbingTimeRef.current;
+                      currentTimeRef.current = target;
+                      setCurrentTimeMs(target);
+                      playerRef.current?.seekTo(target);
+                      scrubbingTimeRef.current = null;
+                      setScrubbingTimeMs(null);
+                    } else {
+                      togglePlayPause();
+                    }
+                  }}
+                  style={({ focused }) => [
+                    styles.progressBarTrack,
+                    focused && styles.progressBarTrackFocused,
+                  ]}
+                >
                   <View
                     style={[
                       styles.progressBarFill,
                       { width: `${progressFraction * 100}%` },
+                      scrubbingTimeMs !== null && styles.progressBarFillScrubbing,
                     ]}
                   />
                   <View
@@ -880,31 +968,33 @@ export default function InternalVlcPlayerScreen() {
                       styles.progressThumb,
                       { left: `${progressFraction * 100}%` },
                       timelineFocused && styles.progressThumbFocused,
+                      scrubbingTimeMs !== null && styles.progressThumbScrubbing,
                     ]}
                   />
-                </View>
+                </Pressable>
 
                 <Text style={styles.timeText}>
                   -{formatTimeMs(remainingMs)} / {formatTimeMs(durationMs)}
                 </Text>
-              </Pressable>
+              </View>
 
-              {/* Linha de Botões de Controle Estilo VLC */}
-              <View style={styles.controlsRow}>
-                {/* Grupo Esquerdo: Navegação de Tempo */}
-                <View style={styles.controlsGroup}>
+              {/* Controles Centralizados: [-5s] [Play/Pause] [+5s] [Recarregar] [Ajustar Tela] [...] */}
+              <View style={styles.bottomBarCenterContainer}>
+                <View style={styles.controlsCenterGroup}>
+                  {/* 1. Botão -5s */}
                   <Pressable
                     focusable={true}
                     onPress={() => performSeekBySeconds(-seekStepSec)}
                     style={({ focused, pressed }) => [
-                      styles.osdIconBtn,
+                      styles.osdCompactBtn,
                       (focused || pressed) && styles.osdBtnFocused,
                     ]}
                   >
-                    <Ionicons name="play-back" size={20} color="#FFF" />
-                    <Text style={styles.osdBtnSubLabel}>-{seekStepSec}s</Text>
+                    <Ionicons name="play-back" size={18} color="#FFF" />
+                    <Text style={styles.osdCompactBtnText}>-{seekStepSec}s</Text>
                   </Pressable>
 
+                  {/* 2. Play / Pause Central Principal */}
                   <Pressable
                     hasTVPreferredFocus={true}
                     focusable={true}
@@ -916,126 +1006,71 @@ export default function InternalVlcPlayerScreen() {
                   >
                     <Ionicons
                       name={paused ? 'play' : 'pause'}
-                      size={26}
+                      size={22}
                       color="#000"
                     />
                   </Pressable>
 
+                  {/* 3. Botão +5s */}
                   <Pressable
                     focusable={true}
                     onPress={() => performSeekBySeconds(seekStepSec)}
                     style={({ focused, pressed }) => [
-                      styles.osdIconBtn,
+                      styles.osdCompactBtn,
                       (focused || pressed) && styles.osdBtnFocused,
                     ]}
                   >
-                    <Ionicons name="play-forward" size={20} color="#FFF" />
-                    <Text style={styles.osdBtnSubLabel}>+{seekStepSec}s</Text>
+                    <Ionicons name="play-forward" size={18} color="#FFF" />
+                    <Text style={styles.osdCompactBtnText}>+{seekStepSec}s</Text>
                   </Pressable>
 
+                  {/* 4. Pular Abertura (+85s OP) */}
                   <Pressable
                     focusable={true}
                     onPress={() => performSeekBySeconds(85)}
                     style={({ focused, pressed }) => [
-                      styles.osdPillBtn,
+                      styles.osdOpBtn,
                       (focused || pressed) && styles.osdBtnFocused,
                     ]}
                   >
-                    <Ionicons name="play-skip-forward" size={16} color="#FF8800" />
-                    <Text style={styles.osdPillBtnText}>+85s OP</Text>
+                    <Ionicons name="play-skip-forward" size={14} color="#FF8800" />
+                    <Text style={styles.osdOpBtnText}>+85s OP</Text>
                   </Pressable>
 
+                  {/* 5. Recarregar (Apenas o Ícone) */}
                   <Pressable
                     focusable={true}
                     onPress={() => handleRetryPlayback(false)}
                     style={({ focused, pressed }) => [
-                      styles.osdIconBtn,
+                      styles.osdIconOnlyBtn,
                       (focused || pressed) && styles.osdBtnFocused,
                     ]}
                   >
-                    <Ionicons name="refresh" size={18} color="#34D399" />
-                    <Text style={styles.osdBtnSubLabel}>Recarregar</Text>
-                  </Pressable>
-                </View>
-
-                {/* Grupo Direito: Opções VLC (Legendas ASS, Áudio, Proporção, Velocidade, VLC Externo) */}
-                <View style={styles.controlsGroup}>
-                  <Pressable
-                    focusable={true}
-                    onPress={() => setActiveModal('subtitles')}
-                    style={({ focused, pressed }) => [
-                      styles.osdOptionBtn,
-                      (focused || pressed) && styles.osdBtnFocused,
-                    ]}
-                  >
-                    <Ionicons name="chatbox-ellipses-outline" size={18} color="#FF8800" />
-                    <View>
-                      <Text style={styles.osdOptionLabel}>Legendas</Text>
-                      <Text style={styles.osdOptionValue} numberOfLines={1}>
-                        {activeSubtitleLabel}
-                      </Text>
-                    </View>
+                    <Ionicons name="refresh" size={19} color="#34D399" />
                   </Pressable>
 
-                  <Pressable
-                    focusable={true}
-                    onPress={() => setActiveModal('audio')}
-                    style={({ focused, pressed }) => [
-                      styles.osdOptionBtn,
-                      (focused || pressed) && styles.osdBtnFocused,
-                    ]}
-                  >
-                    <Ionicons name="volume-high-outline" size={18} color="#3399FF" />
-                    <View>
-                      <Text style={styles.osdOptionLabel}>Áudio</Text>
-                      <Text style={styles.osdOptionValue} numberOfLines={1}>
-                        {activeAudioLabel}
-                      </Text>
-                    </View>
-                  </Pressable>
-
+                  {/* 6. Ajustar a Tela / Proporção (Apenas o Ícone) */}
                   <Pressable
                     focusable={true}
                     onPress={() => setActiveModal('aspect')}
                     style={({ focused, pressed }) => [
-                      styles.osdOptionBtn,
+                      styles.osdIconOnlyBtn,
                       (focused || pressed) && styles.osdBtnFocused,
                     ]}
                   >
-                    <Ionicons name="scan-outline" size={18} color="#10B981" />
-                    <View>
-                      <Text style={styles.osdOptionLabel}>Tela</Text>
-                      <Text style={styles.osdOptionValue} numberOfLines={1}>
-                        {activeScaleLabel}
-                      </Text>
-                    </View>
+                    <Ionicons name="scan-outline" size={19} color="#10B981" />
                   </Pressable>
 
+                  {/* 7. Botão Mais Opções (...) para Legendas, Áudio, Velocidade, VLC */}
                   <Pressable
                     focusable={true}
-                    onPress={() => setActiveModal('speed')}
+                    onPress={() => setActiveModal('more')}
                     style={({ focused, pressed }) => [
-                      styles.osdOptionBtn,
+                      styles.osdMoreBtn,
                       (focused || pressed) && styles.osdBtnFocused,
                     ]}
                   >
-                    <Ionicons name="speedometer-outline" size={18} color="#A855F7" />
-                    <View>
-                      <Text style={styles.osdOptionLabel}>Velocidade</Text>
-                      <Text style={styles.osdOptionValue}>{playbackRate}x</Text>
-                    </View>
-                  </Pressable>
-
-                  <Pressable
-                    focusable={true}
-                    onPress={handleOpenExternalVlc}
-                    style={({ focused, pressed }) => [
-                      styles.osdIconBtn,
-                      (focused || pressed) && styles.osdBtnFocused,
-                    ]}
-                  >
-                    <Ionicons name="open-outline" size={18} color="#FF8800" />
-                    <Text style={styles.osdBtnSubLabel}>VLC App</Text>
+                    <Ionicons name="ellipsis-horizontal" size={20} color="#FFF" />
                   </Pressable>
                 </View>
               </View>
@@ -1338,6 +1373,117 @@ export default function InternalVlcPlayerScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* MODAL 5: Mais Opções (...) - Legendas, Áudio, Velocidade, VLC Externo */}
+        <Modal
+          visible={activeModal === 'more'}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setActiveModal('none')}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalPanel}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderTitleRow}>
+                  <Ionicons name="settings-sharp" size={20} color="#FF8800" />
+                  <Text style={styles.modalTitle}>Opções do Vídeo</Text>
+                </View>
+                <Pressable
+                  focusable={true}
+                  onPress={() => setActiveModal('none')}
+                  style={({ focused }) => [
+                    styles.modalCloseBtn,
+                    focused && styles.osdBtnFocused,
+                  ]}
+                >
+                  <Text style={styles.modalCloseText}>Fechar</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.moreOptionsList}>
+                {/* 1. Legendas */}
+                <Pressable
+                  hasTVPreferredFocus={true}
+                  focusable={true}
+                  onPress={() => setActiveModal('subtitles')}
+                  style={({ focused, pressed }) => [
+                    styles.moreOptionRow,
+                    (focused || pressed) && styles.trackItemFocused,
+                  ]}
+                >
+                  <View style={styles.moreOptionLeft}>
+                    <Ionicons name="chatbox-ellipses" size={20} color="#FF8800" />
+                    <View>
+                      <Text style={styles.moreOptionTitle}>Legendas</Text>
+                      <Text style={styles.moreOptionSubtitle}>{activeSubtitleLabel}</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+                </Pressable>
+
+                {/* 2. Áudio */}
+                <Pressable
+                  focusable={true}
+                  onPress={() => setActiveModal('audio')}
+                  style={({ focused, pressed }) => [
+                    styles.moreOptionRow,
+                    (focused || pressed) && styles.trackItemFocused,
+                  ]}
+                >
+                  <View style={styles.moreOptionLeft}>
+                    <Ionicons name="volume-high" size={20} color="#3399FF" />
+                    <View>
+                      <Text style={styles.moreOptionTitle}>Faixa de Áudio</Text>
+                      <Text style={styles.moreOptionSubtitle}>{activeAudioLabel}</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+                </Pressable>
+
+                {/* 3. Velocidade */}
+                <Pressable
+                  focusable={true}
+                  onPress={() => setActiveModal('speed')}
+                  style={({ focused, pressed }) => [
+                    styles.moreOptionRow,
+                    (focused || pressed) && styles.trackItemFocused,
+                  ]}
+                >
+                  <View style={styles.moreOptionLeft}>
+                    <Ionicons name="speedometer" size={20} color="#A855F7" />
+                    <View>
+                      <Text style={styles.moreOptionTitle}>Velocidade de Reprodução</Text>
+                      <Text style={styles.moreOptionSubtitle}>{playbackRate}x</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+                </Pressable>
+
+                {/* 4. VLC Externo (Intent) */}
+                <Pressable
+                  focusable={true}
+                  onPress={() => {
+                    setActiveModal('none');
+                    handleOpenExternalVlc();
+                  }}
+                  style={({ focused, pressed }) => [
+                    styles.moreOptionRow,
+                    (focused || pressed) && styles.trackItemFocused,
+                  ]}
+                >
+                  <View style={styles.moreOptionLeft}>
+                    <Ionicons name="open-outline" size={20} color="#10B981" />
+                    <View>
+                      <Text style={styles.moreOptionTitle}>Abrir no Aplicativo VLC Externo</Text>
+                      <Text style={styles.moreOptionSubtitle}>Alternar para o player externo do Android</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="arrow-forward-circle" size={20} color="#10B981" />
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </>
   );
@@ -1414,140 +1560,125 @@ const styles = StyleSheet.create({
 
   // Top Bar OSD
   topGradient: {
-    paddingTop: 28,
-    paddingBottom: 36,
-    paddingHorizontal: 42,
+    paddingTop: 18,
+    paddingBottom: 22,
+    paddingHorizontal: 32,
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 16,
+    gap: 12,
   },
   topBackBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 2,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1.5,
     borderColor: 'transparent',
   },
   topBackText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
   },
   titleBlock: {
     flex: 1,
-    marginHorizontal: 12,
+    marginHorizontal: 10,
   },
   animeSeriesText: {
     color: '#FF8800',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   videoTitleText: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 'bold',
   },
-  techBadgesRow: {
+  clockContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  vlcBrandBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 136, 0, 0.18)',
-    borderWidth: 1,
-    borderColor: '#FF8800',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
-  vlcBrandBadgeText: {
-    color: '#FF8800',
-    fontSize: 11,
-    fontWeight: '800',
+  clockText: {
+    color: '#F3F4F6',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   resTechBadge: {
     backgroundColor: 'rgba(51, 153, 255, 0.2)',
     borderWidth: 1,
     borderColor: '#3399FF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   resTechBadgeText: {
     color: '#3399FF',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
   },
 
-  // Bottom Bar OSD
+  // Bottom Bar OSD Compacto e Centralizado
   bottomGradient: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    paddingTop: 36,
-    paddingBottom: 28,
-    paddingHorizontal: 42,
+    paddingTop: 16,
+    paddingBottom: 16,
+    paddingHorizontal: 36,
   },
-  remoteHintRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  remoteHintText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-  },
-  subDelayBadgeText: {
-    color: '#FBBF24',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  timelinePressable: {
+  timelineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    marginBottom: 14,
-  },
-  timelinePressableFocused: {
-    backgroundColor: 'rgba(255, 136, 0, 0.14)',
-    borderColor: '#FF8800',
+    gap: 12,
+    marginBottom: 10,
   },
   timeText: {
     color: '#E5E7EB',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    minWidth: 65,
+    minWidth: 55,
+  },
+  timeTextScrubbing: {
+    color: '#FF8800',
+    fontWeight: '900',
   },
   progressBarTrack: {
     flex: 1,
-    height: 7,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
     borderRadius: 4,
     justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  progressBarTrackFocused: {
+    borderColor: '#FF8800',
+    backgroundColor: 'rgba(255, 136, 0, 0.15)',
   },
   progressBarFill: {
     height: '100%',
     backgroundColor: '#FF8800',
     borderRadius: 4,
+  },
+  progressBarFillScrubbing: {
+    backgroundColor: '#FFA333',
   },
   progressThumb: {
     position: 'absolute',
@@ -1566,95 +1697,132 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
-
-  controlsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 12,
+  progressThumbScrubbing: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginLeft: -10,
+    backgroundColor: '#FF8800',
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+    transform: [{ scale: 1.15 }],
   },
-  controlsGroup: {
+
+  bottomBarCenterContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  controlsCenterGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 10,
   },
   playPauseMainBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#FF8800',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
+    borderWidth: 2.5,
     borderColor: 'transparent',
+    marginHorizontal: 4,
   },
   playPauseMainBtnFocused: {
     backgroundColor: '#FFA333',
     borderColor: '#FFFFFF',
-    transform: [{ scale: 1.08 }],
+    transform: [{ scale: 1.1 }],
   },
-  osdIconBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    minWidth: 62,
-  },
-  osdBtnSubLabel: {
-    color: '#D1D5DB',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  osdPillBtn: {
+  osdCompactBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 136, 0, 0.15)',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 136, 0, 0.4)',
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
-  osdPillBtnText: {
-    color: '#FFFFFF',
+  osdCompactBtnText: {
+    color: '#E5E7EB',
     fontSize: 13,
     fontWeight: '700',
   },
-  osdOptionBtn: {
+  osdOpBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(20, 22, 29, 0.88)',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    maxWidth: 185,
+    gap: 4,
+    backgroundColor: 'rgba(255, 136, 0, 0.16)',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 136, 0, 0.45)',
   },
-  osdOptionLabel: {
-    color: '#9CA3AF',
-    fontSize: 10,
+  osdOpBtnText: {
+    color: '#FF8800',
+    fontSize: 13,
     fontWeight: '700',
-    textTransform: 'uppercase',
   },
-  osdOptionValue: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-    maxWidth: 120,
+  osdIconOnlyBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  osdMoreBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   osdBtnFocused: {
     borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(255, 136, 0, 0.28)',
-    transform: [{ scale: 1.06 }],
+    backgroundColor: 'rgba(255, 136, 0, 0.35)',
+    transform: [{ scale: 1.08 }],
+  },
+
+  // Modal Mais Opções (...)
+  moreOptionsList: {
+    gap: 10,
+    marginTop: 6,
+  },
+  moreOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  moreOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  moreOptionTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  moreOptionSubtitle: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 2,
   },
 
   // Modals (Subtitles / Audio / Aspect / Speed)
