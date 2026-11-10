@@ -138,7 +138,12 @@ export default function InternalVlcPlayerScreen() {
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accumulatedSeekSecRef = useRef(0);
-  const lastUserSeekTimestampRef = useRef<number>(0);
+
+  // Seek em andamento: alvo pedido ao player nativo ainda não confirmado (onSeekComplete).
+  // Cliques seguidos acumulam a partir deste alvo, e não da posição antiga reportada pelo libVLC.
+  const pendingSeekTargetRef = useRef<number | null>(null);
+  const seekSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   const seekStepSec = settings.seekStepSeconds || 5;
 
@@ -178,6 +183,9 @@ export default function InternalVlcPlayerScreen() {
   }, []);
 
   const showControls = useCallback(() => {
+    // Com os controles ocultos o tempo atual só é mantido no ref (evita re-render a cada 200ms);
+    // ao exibir o OSD, sincroniza o estado para a barra mostrar a posição correta.
+    setCurrentTimeMs(currentTimeRef.current);
     setControlsVisible(true);
     scheduleHideControls();
   }, [scheduleHideControls]);
@@ -192,6 +200,7 @@ export default function InternalVlcPlayerScreen() {
       if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       if (seekFeedbackTimerRef.current) clearTimeout(seekFeedbackTimerRef.current);
       if (scrubbingDebounceTimerRef.current) clearTimeout(scrubbingDebounceTimerRef.current);
+      if (seekSafetyTimerRef.current) clearTimeout(seekSafetyTimerRef.current);
     };
   }, [session, router, scheduleHideControls]);
 
@@ -210,6 +219,44 @@ export default function InternalVlcPlayerScreen() {
     }
   }, [router, session]);
 
+  const clearPendingSeek = useCallback(() => {
+    pendingSeekTargetRef.current = null;
+    if (seekSafetyTimerRef.current) {
+      clearTimeout(seekSafetyTimerRef.current);
+      seekSafetyTimerRef.current = null;
+    }
+    setIsSeeking(false);
+  }, []);
+
+  // Ponto único de seek absoluto (±5s, scrub da timeline e clique na barra).
+  // Marca o alvo como pendente até o nativo confirmar via onSeekComplete.
+  const requestSeek = useCallback(
+    (targetMs: number) => {
+      const maxTime = durationRef.current;
+      const target =
+        maxTime > 0 ? Math.max(0, Math.min(maxTime, targetMs)) : Math.max(0, targetMs);
+
+      pendingSeekTargetRef.current = target;
+      currentTimeRef.current = target;
+      setCurrentTimeMs(target);
+      setIsSeeking(true);
+      playerRef.current?.seekTo(target);
+
+      // Rede de segurança: o nativo libera o seek em até 10s; se nenhum evento chegar
+      // (ex.: vídeo pausado), libera aqui. currentTimeRef já guarda o alvo, então a
+      // acumulação dos próximos cliques continua correta.
+      if (seekSafetyTimerRef.current) clearTimeout(seekSafetyTimerRef.current);
+      seekSafetyTimerRef.current = setTimeout(() => {
+        pendingSeekTargetRef.current = null;
+        seekSafetyTimerRef.current = null;
+        setIsSeeking(false);
+      }, 12000);
+
+      return target;
+    },
+    []
+  );
+
   // Aplica o seek efetivo após soltar as teclas de avanço na barra (debounce de 900ms)
   const commitTimelineScrub = useCallback(() => {
     if (scrubbingDebounceTimerRef.current) {
@@ -218,14 +265,12 @@ export default function InternalVlcPlayerScreen() {
     scrubbingDebounceTimerRef.current = setTimeout(() => {
       const targetTime = scrubbingTimeRef.current;
       if (targetTime !== null) {
-        currentTimeRef.current = targetTime;
-        setCurrentTimeMs(targetTime);
-        playerRef.current?.seekTo(targetTime);
+        requestSeek(targetTime);
         scrubbingTimeRef.current = null;
         setScrubbingTimeMs(null);
       }
     }, 900);
-  }, []);
+  }, [requestSeek]);
 
   // Ajusta a posição da barra em 1 minuto (+60s ou -60s) sem pular o vídeo na hora
   const adjustTimelineScrub = useCallback(
@@ -252,18 +297,9 @@ export default function InternalVlcPlayerScreen() {
 
   // Perform relative seek (e.g. -5s or +5s) with cumulative visual indicator
   const performSeekBySeconds = useCallback((deltaSeconds: number) => {
-    const deltaMs = deltaSeconds * 1000;
-    const baseTime = currentTimeRef.current;
-    const maxTime = durationRef.current;
-    const nextTime =
-      maxTime > 0
-        ? Math.max(0, Math.min(maxTime, baseTime + deltaMs))
-        : Math.max(0, baseTime + deltaMs);
-
-    lastUserSeekTimestampRef.current = Date.now();
-    currentTimeRef.current = nextTime;
-    setCurrentTimeMs(nextTime);
-    playerRef.current?.seekTo(nextTime);
+    // Cliques rápidos acumulam a partir do alvo ainda pendente
+    const baseTime = pendingSeekTargetRef.current ?? currentTimeRef.current;
+    const nextTime = requestSeek(baseTime + deltaSeconds * 1000);
 
     accumulatedSeekSecRef.current += deltaSeconds;
     setSeekFeedback({
@@ -279,7 +315,7 @@ export default function InternalVlcPlayerScreen() {
       accumulatedSeekSecRef.current = 0;
       setSeekFeedback((prev) => ({ ...prev, visible: false }));
     }, 1100);
-  }, []);
+  }, [requestSeek]);
 
   const togglePlayPause = useCallback(() => {
     const nextPaused = !pausedRef.current;
@@ -470,6 +506,7 @@ export default function InternalVlcPlayerScreen() {
       if (!session) return;
 
       const savedPos = currentTimeRef.current > 2000 ? currentTimeRef.current : 0;
+      clearPendingSeek();
       setResumeFromMs(savedPos);
       setErrorMsg(null);
       setIsBuffering(true);
@@ -507,7 +544,7 @@ export default function InternalVlcPlayerScreen() {
 
       setRetryCount((prev) => prev + 1);
     },
-    [session]
+    [session, clearPendingSeek]
   );
 
   // Watchdog de carregamento: evita ficar carregando infinitamente quando o Webtor está frio na 1ª execução
@@ -593,17 +630,29 @@ export default function InternalVlcPlayerScreen() {
               if (e.nativeEvent.currentTime > 0 || e.nativeEvent.duration > 0) {
                 hasStartedPlaybackRef.current = true;
               }
-              // Ignora eventos de progresso antigos que chegam logo após o usuário solicitar um seek
-              // para não "puxar" o vídeo de volta para a posição anterior
-              if (Date.now() - lastUserSeekTimestampRef.current < 650) {
+              // Enquanto um seek não é confirmado pelo nativo (onSeekComplete), ignora o progresso
+              // para não "puxar" a posição de volta e não usar uma base antiga no próximo clique.
+              if (e.nativeEvent.seeking || pendingSeekTargetRef.current !== null) {
                 return;
               }
-              setCurrentTimeMs(e.nativeEvent.currentTime);
+              currentTimeRef.current = e.nativeEvent.currentTime;
+              // Só re-renderiza a tela a cada progresso quando o OSD está visível
+              if (controlsVisibleRef.current) {
+                setCurrentTimeMs(e.nativeEvent.currentTime);
+              }
               if (e.nativeEvent.duration > 0) {
                 setDurationMs(e.nativeEvent.duration);
               }
               setIsBuffering(false);
               setLoadingElapsedSec(0);
+            }}
+            onSeekComplete={(e) => {
+              clearPendingSeek();
+              currentTimeRef.current = e.nativeEvent.currentTime;
+              setCurrentTimeMs(e.nativeEvent.currentTime);
+              if (e.nativeEvent.duration > 0) {
+                setDurationMs(e.nativeEvent.duration);
+              }
             }}
             onPlaying={() => {
               setPaused(false);
@@ -709,6 +758,8 @@ export default function InternalVlcPlayerScreen() {
               <Text style={styles.bufferingText}>
                 {isRefreshingLink
                   ? 'Renovando conexão com o Webtor...'
+                  : isSeeking
+                  ? 'Buscando posição...'
                   : bufferingPct > 0 && bufferingPct < 100
                   ? `Carregando buffer... ${bufferingPct}%`
                   : 'Carregando vídeo e legendas ASS...'}
@@ -722,7 +773,10 @@ export default function InternalVlcPlayerScreen() {
                   </Text>
                   <View style={styles.loadingRetryRow}>
                     <Pressable
-                      hasTVPreferredFocus={true}
+                      // Só puxa o foco no carregamento inicial. Depois que o vídeo já tocou
+                      // (buffering de um seek), roubar o foco fazia um OK no controle recriar
+                      // o player do zero (~30s de tela preta no logcat).
+                      hasTVPreferredFocus={!hasStartedPlaybackRef.current}
                       focusable={true}
                       onPress={() => handleRetryPlayback(false)}
                       style={({ focused, pressed }) => [
@@ -929,10 +983,7 @@ export default function InternalVlcPlayerScreen() {
                     // Se sair da barra antes do debounce, aplica imediatamente
                     if (scrubbingTimeRef.current !== null) {
                       if (scrubbingDebounceTimerRef.current) clearTimeout(scrubbingDebounceTimerRef.current);
-                      const target = scrubbingTimeRef.current;
-                      currentTimeRef.current = target;
-                      setCurrentTimeMs(target);
-                      playerRef.current?.seekTo(target);
+                      requestSeek(scrubbingTimeRef.current);
                       scrubbingTimeRef.current = null;
                       setScrubbingTimeMs(null);
                     }
@@ -941,10 +992,7 @@ export default function InternalVlcPlayerScreen() {
                     // Clicar em OK na barra enquanto busca aplica a posição na hora
                     if (scrubbingTimeRef.current !== null) {
                       if (scrubbingDebounceTimerRef.current) clearTimeout(scrubbingDebounceTimerRef.current);
-                      const target = scrubbingTimeRef.current;
-                      currentTimeRef.current = target;
-                      setCurrentTimeMs(target);
-                      playerRef.current?.seekTo(target);
+                      requestSeek(scrubbingTimeRef.current);
                       scrubbingTimeRef.current = null;
                       setScrubbingTimeMs(null);
                     } else {
