@@ -77,8 +77,8 @@
     },
     "name": "CAMIITV",
     "slug": "CAMIITV",
-    "version": "1.0.3",
-    "runtimeVersion": "1.0.3",
+    "version": "1.0.2",
+    "runtimeVersion": "1.0.2",
     "updates": {
       "url": "https://u.expo.dev/a12556e6-0ae7-4d22-8b71-0beb66062e5f"
     },

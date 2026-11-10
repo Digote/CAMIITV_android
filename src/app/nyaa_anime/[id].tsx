@@ -104,6 +104,8 @@ export default function NyaaAnimeDetailsScreen() {
         animeName: anime?.nome,
         poster: anime?.img,
         episodeId: String(opcao.id),
+        nyaaOptionId: opcao.id,
+        fallbackStreamUrl: response.data?.stream_url,
         isNyaaOnly: true,
       });
     } catch (error) {

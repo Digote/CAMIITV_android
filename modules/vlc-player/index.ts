@@ -25,6 +25,7 @@ export interface VlcSourceConfig {
   startPositionMs?: number;
   httpUserAgent?: string;
   headers?: Record<string, string>;
+  retryCount?: number;
 }
 
 export interface VlcTracksPayload {
@@ -70,6 +71,7 @@ export interface CamiiVlcPlayerRef {
   setSubtitleDelay: (delayMs: number) => Promise<void>;
   setScaleType: (scaleType: VlcScaleType) => Promise<void>;
   setRate: (rate: number) => Promise<void>;
+  reload: () => Promise<void>;
 }
 
 export interface CamiiVlcPlayerProps extends ViewProps {

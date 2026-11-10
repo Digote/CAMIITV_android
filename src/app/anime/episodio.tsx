@@ -190,6 +190,8 @@ export default function EpisodioNetflixScreen() {
         animeName: anime.nome,
         poster: episode.imagem || anime.banner || anime.imagem,
         episodeId: episode.id,
+        nyaaOptionId: opcao.id,
+        fallbackStreamUrl: response.data?.stream_url,
         isNyaaOnly: episode.isNyaaOnly,
         onShouldPromptWatched: () => {
           if (!episode.isNyaaOnly) {

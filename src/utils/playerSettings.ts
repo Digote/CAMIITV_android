@@ -143,6 +143,8 @@ export interface PlayerSessionPayload {
   animeName?: string;
   poster?: string;
   episodeId?: string;
+  nyaaOptionId?: number;
+  fallbackStreamUrl?: string;
   isNyaaOnly?: boolean;
   onShouldPromptWatched?: () => void;
   onMarkWatched?: () => Promise<void> | void;

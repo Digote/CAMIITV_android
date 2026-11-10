@@ -42,7 +42,10 @@ class CamiiVlcPlayerView(
   private var videoLayout: VLCVideoLayout? = null
 
   private var currentUri: String? = null
-  private var networkCachingMs: Int = 1500
+  private var currentUserAgent: String? = null
+  private var currentHeaders: Map<*, *>? = null
+  private var currentRetryCount: Int = 0
+  private var networkCachingMs: Int = 2500
   private var hardwareAcceleration: Boolean = true
   private var startPositionMs: Long = 0L
   private var hasAppliedStartPosition: Boolean = false
@@ -91,18 +94,27 @@ class CamiiVlcPlayerView(
       return
     }
 
-    val caching = (source["networkCachingMs"] as? Number)?.toInt() ?: 1500
+    val caching = (source["networkCachingMs"] as? Number)?.toInt() ?: 2500
     val hwAccel = (source["hardwareAcceleration"] as? Boolean) ?: true
     val startPos = (source["startPositionMs"] as? Number)?.toLong() ?: 0L
     val headers = source["headers"] as? Map<*, *>
     val userAgent = source["httpUserAgent"] as? String
+    val retryCount = (source["retryCount"] as? Number)?.toInt() ?: 0
 
-    if (uri == currentUri && mediaPlayer != null && hwAccel == hardwareAcceleration) {
+    if (
+      uri == currentUri &&
+      mediaPlayer != null &&
+      hwAccel == hardwareAcceleration &&
+      retryCount == currentRetryCount
+    ) {
       return
     }
 
     currentUri = uri
-    networkCachingMs = caching.coerceIn(300, 10000)
+    currentUserAgent = userAgent
+    currentHeaders = headers
+    currentRetryCount = retryCount
+    networkCachingMs = caching.coerceIn(300, 15000)
     hardwareAcceleration = hwAccel
     startPositionMs = startPos
     hasAppliedStartPosition = false
@@ -112,6 +124,21 @@ class CamiiVlcPlayerView(
     startPlayback(uri, userAgent, headers)
   }
 
+  fun reloadPlayback() {
+    val uri = currentUri ?: return
+    val player = mediaPlayer
+    if (player != null && !player.isReleased) {
+      val currentPos = player.getTime().coerceAtLeast(0L)
+      if (currentPos > 0L) {
+        startPositionMs = currentPos
+      }
+    }
+    hasAppliedStartPosition = false
+    hasEmittedLoad = false
+    lastTracksHash = ""
+    startPlayback(uri, currentUserAgent, currentHeaders)
+  }
+
   private fun startPlayback(uriString: String, userAgent: String?, headers: Map<*, *>?) {
     mainHandler.post {
       try {
@@ -119,8 +146,9 @@ class CamiiVlcPlayerView(
 
         val options = arrayListOf(
           "--network-caching=$networkCachingMs",
-          "--file-caching=1500",
+          "--file-caching=2000",
           "--live-caching=$networkCachingMs",
+          "--http-reconnect",
           "--clock-jitter=0",
           "--clock-synchro=0",
           "--freetype-rel-fontsize=16",
@@ -281,12 +309,22 @@ class CamiiVlcPlayerView(
 
       MediaPlayer.Event.EndReached -> {
         keepScreenOn = false
-        onEnded(
-          mapOf(
-            "currentTime" to player.getLength().coerceAtLeast(0L).toDouble(),
-            "duration" to player.getLength().coerceAtLeast(0L).toDouble()
+        val totalLen = player.getLength().coerceAtLeast(0L)
+        if (!hasEmittedLoad && totalLen <= 0L) {
+          onError(
+            mapOf(
+              "message" to "O servidor Webtor ainda estava preparando o vídeo na primeira execução. Clique em Tentar Novamente.",
+              "uri" to (currentUri ?: "")
+            )
           )
-        )
+        } else {
+          onEnded(
+            mapOf(
+              "currentTime" to totalLen.toDouble(),
+              "duration" to totalLen.toDouble()
+            )
+          )
+        }
       }
 
       MediaPlayer.Event.EncounteredError -> {

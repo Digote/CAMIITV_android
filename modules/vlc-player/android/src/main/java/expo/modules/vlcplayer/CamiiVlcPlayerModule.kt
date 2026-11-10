@@ -91,6 +91,10 @@ class CamiiVlcPlayerModule : Module() {
         view.setRateProp(rate.toFloat())
       }
 
+      AsyncFunction("reload") { view: CamiiVlcPlayerView ->
+        view.reloadPlayback()
+      }
+
       OnViewDestroys { view: CamiiVlcPlayerView ->
         view.releasePlayer()
       }

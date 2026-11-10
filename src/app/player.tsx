@@ -27,6 +27,7 @@ import {
   openExternalVlcIntent,
   usePlayerSettings,
 } from '@/utils/playerSettings';
+import api from '@/services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -68,6 +69,13 @@ export default function InternalVlcPlayerScreen() {
   const [session] = useState(() => getCurrentPlayerSession());
   const nativeAvailable = isNativeVlcAvailable();
 
+  // Stream URL & retry state (handles Webtor cold-start on 1st execution)
+  const [activeStreamUrl, setActiveStreamUrl] = useState<string>(() => session?.url || '');
+  const [retryCount, setRetryCount] = useState<number>(0);
+  const [resumeFromMs, setResumeFromMs] = useState<number>(0);
+  const [loadingElapsedSec, setLoadingElapsedSec] = useState<number>(0);
+  const [isRefreshingLink, setIsRefreshingLink] = useState<boolean>(false);
+
   // Playback state
   const [paused, setPaused] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
@@ -106,6 +114,7 @@ export default function InternalVlcPlayerScreen() {
   const timelineFocusedRef = useRef(false);
   const activeModalRef = useRef<'none' | 'subtitles' | 'audio' | 'aspect' | 'speed'>('none');
   const autoAppliedTracksRef = useRef(false);
+  const hasStartedPlaybackRef = useRef(false);
   const startTimeWallRef = useRef(Date.now());
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -387,11 +396,84 @@ export default function InternalVlcPlayerScreen() {
   };
 
   const handleOpenExternalVlc = () => {
-    if (!session?.url) return;
+    const targetUrl = activeStreamUrl || session?.url;
+    if (!targetUrl || !session) return;
     setPaused(true);
     playerRef.current?.setPaused(true);
-    openExternalVlcIntent(session.url, session.title);
+    openExternalVlcIntent(targetUrl, session.title);
   };
+
+  // Recarrega o stream (e revalida o link no Webtor se for episódio Nyaa/Webtor)
+  const handleRetryPlayback = useCallback(
+    async (useAlternativeHls?: boolean) => {
+      if (!session) return;
+
+      const savedPos = currentTimeRef.current > 2000 ? currentTimeRef.current : 0;
+      setResumeFromMs(savedPos);
+      setErrorMsg(null);
+      setIsBuffering(true);
+      setBufferingPct(0);
+      setLoadingElapsedSec(0);
+      setPaused(false);
+      pausedRef.current = false;
+
+      if (useAlternativeHls && session.fallbackStreamUrl) {
+        setActiveStreamUrl(session.fallbackStreamUrl);
+        setRetryCount((prev) => prev + 1);
+        return;
+      }
+
+      if (session.nyaaOptionId) {
+        setIsRefreshingLink(true);
+        try {
+          const response = await api.get(
+            `/nyaa/episodio/${session.nyaaOptionId}/stream`,
+            { timeout: 12000 }
+          );
+          const freshUrl =
+            response.data?.link ||
+            response.data?.download_url ||
+            response.data?.stream_url;
+          if (freshUrl) {
+            setActiveStreamUrl(freshUrl);
+          }
+        } catch {
+          // Mantém a URL atual caso a renovação falhe
+        } finally {
+          setIsRefreshingLink(false);
+        }
+      }
+
+      setRetryCount((prev) => prev + 1);
+    },
+    [session]
+  );
+
+  // Watchdog de carregamento: evita ficar carregando infinitamente quando o Webtor está frio na 1ª execução
+  useEffect(() => {
+    if (!nativeAvailable || !isBuffering || errorMsg || paused) {
+      setLoadingElapsedSec(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setLoadingElapsedSec((prev) => {
+        const next = prev + 1;
+        if (!hasStartedPlaybackRef.current && next >= 18) {
+          setIsBuffering(false);
+          setPaused(true);
+          playerRef.current?.setPaused(true);
+          setErrorMsg(
+            'O vídeo demorou para responder na primeira execução (o servidor Webtor ainda estava preparando o torrent). Clique em Tentar Novamente para carregar.'
+          );
+          setControlsVisible(true);
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [nativeAvailable, isBuffering, errorMsg, paused, retryCount]);
 
   if (!session) {
     return <View style={styles.container} />;
@@ -421,19 +503,24 @@ export default function InternalVlcPlayerScreen() {
         {/* Camada 1: Superfície Nativa LibVLC (MKV + ASS/SSA Subtitles) */}
         {nativeAvailable ? (
           <CamiiVlcPlayerView
+            key={`vlc-instance-${retryCount}`}
             ref={playerRef}
             style={StyleSheet.absoluteFill}
             source={{
-              uri: session.url,
-              networkCachingMs: 1800,
+              uri: activeStreamUrl || session.url,
+              networkCachingMs: 2500,
               hardwareAcceleration: settings.hardwareAcceleration,
+              startPositionMs: resumeFromMs,
+              retryCount,
             }}
             paused={paused}
             rate={playbackRate}
             scaleType={scaleType}
             subtitleDelayMs={subtitleDelayMs}
             onLoad={(e) => {
+              hasStartedPlaybackRef.current = true;
               setIsBuffering(false);
+              setLoadingElapsedSec(0);
               setErrorMsg(null);
               handleTracksPayload(e.nativeEvent);
             }}
@@ -441,11 +528,15 @@ export default function InternalVlcPlayerScreen() {
               handleTracksPayload(e.nativeEvent);
             }}
             onProgress={(e) => {
+              if (e.nativeEvent.currentTime > 0 || e.nativeEvent.duration > 0) {
+                hasStartedPlaybackRef.current = true;
+              }
               setCurrentTimeMs(e.nativeEvent.currentTime);
               if (e.nativeEvent.duration > 0) {
                 setDurationMs(e.nativeEvent.duration);
               }
               setIsBuffering(false);
+              setLoadingElapsedSec(0);
             }}
             onPlaying={() => {
               setPaused(false);
@@ -459,6 +550,20 @@ export default function InternalVlcPlayerScreen() {
               setIsBuffering(e.nativeEvent.isBuffering);
             }}
             onEnded={() => {
+              // Se o stream fechar com duração 0 sem ter reproduzido nada (comum na 1ª execução fria do Webtor),
+              // não sai do player — exibe a tela de erro com botão para Tentar Novamente!
+              if (
+                !hasStartedPlaybackRef.current &&
+                durationRef.current <= 0 &&
+                currentTimeRef.current <= 0
+              ) {
+                setIsBuffering(false);
+                setErrorMsg(
+                  'O servidor Webtor encerrou a primeira tentativa enquanto preparava o torrent. Clique em Tentar Novamente para reproduzir.'
+                );
+                setControlsVisible(true);
+                return;
+              }
               session.onShouldPromptWatched?.();
               handleExitPlayer();
             }}
@@ -466,7 +571,7 @@ export default function InternalVlcPlayerScreen() {
               setIsBuffering(false);
               setErrorMsg(
                 e.nativeEvent?.message ||
-                  'Não foi possível reproduzir este arquivo MKV/Stream no player interno.'
+                  'Não foi possível carregar o stream de vídeo na primeira tentativa. Clique em Tentar Novamente.'
               );
               setControlsVisible(true);
             }}
@@ -523,16 +628,70 @@ export default function InternalVlcPlayerScreen() {
           />
         )}
 
-        {/* Camada 3: Indicador de Carregamento / Buffering */}
+        {/* Camada 3: Indicador de Carregamento / Buffering (com botão Tentar Novamente se demorar > 5s) */}
         {nativeAvailable && isBuffering && !errorMsg && (
-          <View style={styles.centerOverlay} pointerEvents="none">
+          <View
+            style={styles.centerOverlay}
+            pointerEvents={loadingElapsedSec >= 5 ? 'box-none' : 'none'}
+          >
             <View style={styles.bufferingBox}>
               <ActivityIndicator size="large" color="#FF8800" />
               <Text style={styles.bufferingText}>
-                {bufferingPct > 0 && bufferingPct < 100
+                {isRefreshingLink
+                  ? 'Renovando conexão com o Webtor...'
+                  : bufferingPct > 0 && bufferingPct < 100
                   ? `Carregando buffer... ${bufferingPct}%`
                   : 'Carregando vídeo e legendas ASS...'}
               </Text>
+              {loadingElapsedSec >= 5 && (
+                <>
+                  <Text style={styles.bufferingSubText}>
+                    {loadingElapsedSec >= 10
+                      ? `O Webtor pode demorar na 1ª execução (${loadingElapsedSec}s). Você já pode recarregar o stream:`
+                      : `Aguardando resposta do stream (${loadingElapsedSec}s)...`}
+                  </Text>
+                  <View style={styles.loadingRetryRow}>
+                    <Pressable
+                      hasTVPreferredFocus={true}
+                      focusable={true}
+                      onPress={() => handleRetryPlayback(false)}
+                      style={({ focused, pressed }) => [
+                        styles.fallbackBtnPrimary,
+                        (focused || pressed) && styles.btnFocused,
+                      ]}
+                    >
+                      <Ionicons name="refresh" size={18} color="#000" />
+                      <Text style={styles.fallbackBtnPrimaryText}>
+                        Tentar Novamente
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      focusable={true}
+                      onPress={handleOpenExternalVlc}
+                      style={({ focused, pressed }) => [
+                        styles.fallbackBtnSecondary,
+                        (focused || pressed) && styles.btnFocused,
+                      ]}
+                    >
+                      <Text style={styles.fallbackBtnSecondaryText}>
+                        VLC Externo
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      focusable={true}
+                      onPress={handleExitPlayer}
+                      style={({ focused, pressed }) => [
+                        styles.fallbackBtnSecondary,
+                        (focused || pressed) && styles.btnFocused,
+                      ]}
+                    >
+                      <Text style={styles.fallbackBtnSecondaryText}>Voltar</Text>
+                    </Pressable>
+                  </View>
+                </>
+              )}
             </View>
           </View>
         )}
@@ -564,27 +723,58 @@ export default function InternalVlcPlayerScreen() {
           </View>
         )}
 
-        {/* Camada 5: Erro de Reprodução (com opção de tentar no VLC Externo) */}
+        {/* Camada 5: Erro de Reprodução (com botão principal para Tentar Novamente + opção VLC Externo) */}
         {errorMsg && nativeAvailable && (
           <View style={styles.centerOverlay}>
             <View style={styles.errorBox}>
               <Ionicons name="alert-circle-outline" size={46} color="#EF4444" />
-              <Text style={styles.errorTitle}>Erro na Reprodução</Text>
+              <Text style={styles.errorTitle}>Não foi possível carregar de primeira</Text>
               <Text style={styles.errorDesc}>{errorMsg}</Text>
-              <View style={styles.missingNativeActions}>
+              <View style={styles.errorActionsWrap}>
                 <Pressable
                   hasTVPreferredFocus={true}
                   focusable={true}
-                  onPress={handleOpenExternalVlc}
+                  onPress={() => handleRetryPlayback(false)}
                   style={({ focused, pressed }) => [
                     styles.fallbackBtnPrimary,
                     (focused || pressed) && styles.btnFocused,
                   ]}
                 >
+                  <Ionicons name="refresh" size={20} color="#000" />
                   <Text style={styles.fallbackBtnPrimaryText}>
+                    Tentar Novamente
+                  </Text>
+                </Pressable>
+
+                {!!session.fallbackStreamUrl &&
+                  activeStreamUrl !== session.fallbackStreamUrl && (
+                    <Pressable
+                      focusable={true}
+                      onPress={() => handleRetryPlayback(true)}
+                      style={({ focused, pressed }) => [
+                        styles.fallbackBtnSecondary,
+                        (focused || pressed) && styles.btnFocused,
+                      ]}
+                    >
+                      <Text style={styles.fallbackBtnSecondaryText}>
+                        Tentar Stream Alternativo (HLS)
+                      </Text>
+                    </Pressable>
+                  )}
+
+                <Pressable
+                  focusable={true}
+                  onPress={handleOpenExternalVlc}
+                  style={({ focused, pressed }) => [
+                    styles.fallbackBtnSecondary,
+                    (focused || pressed) && styles.btnFocused,
+                  ]}
+                >
+                  <Text style={styles.fallbackBtnSecondaryText}>
                     Abrir no VLC Externo
                   </Text>
                 </Pressable>
+
                 <Pressable
                   focusable={true}
                   onPress={handleExitPlayer}
@@ -753,6 +943,18 @@ export default function InternalVlcPlayerScreen() {
                   >
                     <Ionicons name="play-skip-forward" size={16} color="#FF8800" />
                     <Text style={styles.osdPillBtnText}>+85s OP</Text>
+                  </Pressable>
+
+                  <Pressable
+                    focusable={true}
+                    onPress={() => handleRetryPlayback(false)}
+                    style={({ focused, pressed }) => [
+                      styles.osdIconBtn,
+                      (focused || pressed) && styles.osdBtnFocused,
+                    ]}
+                  >
+                    <Ionicons name="refresh" size={18} color="#34D399" />
+                    <Text style={styles.osdBtnSubLabel}>Recarregar</Text>
                   </Pressable>
                 </View>
 
@@ -1152,19 +1354,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bufferingBox: {
-    backgroundColor: 'rgba(15, 17, 23, 0.85)',
-    paddingVertical: 18,
-    paddingHorizontal: 28,
-    borderRadius: 14,
+    backgroundColor: 'rgba(15, 17, 23, 0.92)',
+    paddingVertical: 20,
+    paddingHorizontal: 30,
+    borderRadius: 16,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 136, 0, 0.35)',
     gap: 10,
+    maxWidth: 540,
   },
   bufferingText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  bufferingSubText: {
+    color: '#9CA3AF',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  loadingRetryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 6,
   },
   seekFeedbackOverlay: {
     position: 'absolute',
@@ -1625,7 +1843,7 @@ const styles = StyleSheet.create({
     padding: 28,
     borderRadius: 16,
     alignItems: 'center',
-    maxWidth: 480,
+    maxWidth: 560,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.4)',
   },
@@ -1641,5 +1859,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 22,
+    lineHeight: 20,
+  },
+  errorActionsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
   },
 });
